@@ -1,0 +1,47 @@
+[project]
+name = "opportunity-hunter"
+version = "0.1.0"
+description = "Standalone and embeddable marketplace opportunity engine"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = [
+    "psycopg[binary]>=3.3.9",
+    "requests>=2.32,<3",
+    "sqlalchemy>=2.1.9",
+]
+
+[project.optional-dependencies]
+subito = [
+    "subito-scanner @ git+https://github.com/Tdavide04/subito-scanner@2cb97be49a7fd5187a6819c8349d7b26fb72d8d3",
+]
+
+[project.scripts]
+opportunity-hunter = "opportunity_hunter.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=9.2.0",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 160
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+files = ["src"]
+ignore_missing_imports = true
