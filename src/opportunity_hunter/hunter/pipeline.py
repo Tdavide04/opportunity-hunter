@@ -243,16 +243,20 @@ class Pipeline:
     def _close_abandoned_runs(self) -> None:
         """Holding the worker lock, any run still `running` belonged to a worker that died mid-run."""
         with self.session_factory() as session, session.begin():
-            closed = session.execute(
+            result = session.execute(
                 update(AcquisitionRun)
                 .where(AcquisitionRun.status == "running")
                 .values(status="failed", error_kind="internal", error_message="abandoned: the worker stopped during the run", finished_at=self.now())
-            ).rowcount
+            )
+            rowcount = getattr(result, "rowcount", 0)
+            closed = rowcount if isinstance(rowcount, int) else 0
         if closed:
             logger.warning("abandoned runs closed", extra={"event": "runs_abandoned", "count": closed})
 
     def _save_progress(self, session: Session, run_id: int, totals: dict[str, int]) -> None:
         run = session.get(AcquisitionRun, run_id)
+        if run is None:
+            raise LookupError(f"Acquisition Run {run_id} not found")
         run.pages = totals["pages"]
         run.listings_seen = totals["seen"]
         run.listings_new = totals["new"]
@@ -269,11 +273,17 @@ class Pipeline:
         with self.session_factory() as session, session.begin():
             self._save_progress(session, run_id, totals)
             run = session.get(AcquisitionRun, run_id)
+            if run is None:
+                raise LookupError(f"Acquisition Run {run_id} not found")
+            finished_at = self.now()
             run.status = status
-            run.finished_at = self.now()
+            run.finished_at = finished_at
             run.error_kind = error_kind
             run.error_message = error_message
             if complete_baseline and status == "succeeded":
                 # the first successful run is the Baseline: from now on new Opportunities notify
-                session.get(MarketplaceQuery, run.marketplace_query_id).baseline_completed_at = run.finished_at
+                query = session.get(MarketplaceQuery, run.marketplace_query_id)
+                if query is None:
+                    raise LookupError(f"Marketplace Query {run.marketplace_query_id} not found")
+                query.baseline_completed_at = finished_at
         return status
