@@ -26,11 +26,13 @@ def maintain(session_factory: sessionmaker[Session], now: datetime) -> int | Non
         if checked is not None and now - datetime.fromisoformat(checked.value) < MAINTENANCE_INTERVAL:
             return None
         cutoff = now - timedelta(days=settings["not_seen_after_days"])
-        marked = session.execute(
+        result = session.execute(
             update(Listing)
             .where(Listing.availability == "active", Listing.origin == "acquired", Listing.last_seen_at < cutoff)
             .values(availability="not_seen")
-        ).rowcount
+        )
+        rowcount = getattr(result, "rowcount", 0)
+        marked = rowcount if isinstance(rowcount, int) else 0
         session.merge(AppSetting(key=CHECKED_AT, value=now.isoformat()))
     if marked:
         logger.info("listings marked not seen", extra={"event": "availability_not_seen", "count": marked})
