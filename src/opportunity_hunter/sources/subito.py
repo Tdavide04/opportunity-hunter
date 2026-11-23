@@ -24,8 +24,14 @@ class SubitoSourceAdapter:
             return self.scanner.validate_params(raw)
         except Exception as exc:
             if type(exc).__name__ == "InvalidQueryError":
+                from typing import cast
+
                 from opportunity_hunter.adapter import InvalidParams
-                raise InvalidParams(exc.errors) from exc
+
+                errors = getattr(exc, "errors", None)
+                if isinstance(errors, list):
+                    typed_errors = cast(list[tuple[tuple[str, ...], str]], errors)
+                    raise InvalidParams(typed_errors) from exc
             raise
 
     def fetch_page(self, params: dict[str, Any], cursor: Any | None) -> Page:
@@ -68,7 +74,7 @@ class UnavailableSource:
     def __init__(self, marketplace: str, reason: str) -> None:
         self.marketplace = marketplace
         self.reason = reason
-        self.capabilities = frozenset()
+        self.capabilities: frozenset[str] = frozenset()
 
     def validate_params(self, raw: dict[str, Any]) -> dict[str, Any]:
         return dict(raw)
