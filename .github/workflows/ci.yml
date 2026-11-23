@@ -35,7 +35,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync
+      - run: uv sync --all-extras  # the real scanners run in tests/test_sources.py
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run pytest
