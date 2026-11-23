@@ -4,7 +4,6 @@ from typing import Any, Protocol
 
 from opportunity_hunter.domain import ListingCandidate
 
-
 # optional canonical fields an adapter may declare it provides; the others are "not applicable" for it
 CAPABILITIES: frozenset[str] = frozenset({"description", "images", "location", "seller", "condition", "published_at"})
 
