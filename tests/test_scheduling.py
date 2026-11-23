@@ -81,7 +81,7 @@ def test_a_second_worker_exits_immediately_while_the_lock_is_held(pipeline, add_
     add_query()
     with engine.connect() as other_worker:
         assert other_worker.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": WORKER_LOCK_KEY}).scalar() is True
-        with caplog.at_level("INFO", logger="pch.hunter.pipeline"):
+        with caplog.at_level("INFO", logger="opportunity_hunter.hunter.pipeline"):
             result = pipeline.run_due()
         other_worker.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": WORKER_LOCK_KEY})
 
