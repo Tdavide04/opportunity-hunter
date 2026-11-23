@@ -1,0 +1,1 @@
+"""Opportunity Hunter test suite."""
