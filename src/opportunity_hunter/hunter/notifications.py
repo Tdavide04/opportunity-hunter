@@ -16,7 +16,15 @@ logger = logging.getLogger(__name__)
 
 NEW_OPPORTUNITY = "new_opportunity"
 PRICE_DROP = "price_drop"
-SETTING_DEFAULTS: dict[str, Any] = {"notifications_paused": False, "dry_run": False, "price_drop_min_percent": 10, "not_seen_after_days": 7, "circuit_failures": 3, "circuit_suspend_minutes": 60, "shadow_marketplaces": []}
+SETTING_DEFAULTS: dict[str, Any] = {
+    "notifications_paused": False,
+    "dry_run": False,
+    "price_drop_min_percent": 10,
+    "not_seen_after_days": 7,
+    "circuit_failures": 3,
+    "circuit_suspend_minutes": 60,
+    "shadow_marketplaces": [],
+}
 PRICE_STATUS_TEXT = {"free": "Gratis", "on_request": "Su richiesta", "missing": "Prezzo mancante"}
 
 
@@ -96,7 +104,16 @@ def dispatch(session_factory: sessionmaker[Session], channels: Sequence[Notifica
             except ChannelError as exc:
                 row.status, row.last_error = "failed", str(exc)
                 result["failed"] += 1
-                logger.warning("notification failed", extra={"event": "notification_failed", "notification_id": row.id, "channel": row.channel, "attempt": row.attempts, "error": str(exc)})
+                logger.warning(
+                    "notification failed",
+                    extra={
+                        "event": "notification_failed",
+                        "notification_id": row.id,
+                        "channel": row.channel,
+                        "attempt": row.attempts,
+                        "error": str(exc),
+                    },
+                )
                 continue
             row.status, row.last_error, row.sent_at = "sent", None, now
             result["sent"] += 1
