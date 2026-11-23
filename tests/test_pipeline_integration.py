@@ -51,14 +51,17 @@ def test_pipeline_runs_against_the_extracted_orm_and_existing_table_contract():
         "search_profile", "marketplace_query", "acquisition_run", "listing",
         "match", "opportunity", "notification", "app_setting", "listing_price_history",
     )
+    created_schema = False
     try:
         # CI supplies a fresh dedicated database. Never truncate or drop unknown user tables.
-        existing = set(__import__("sqlalchemy").inspect(engine).get_table_names())
+        from sqlalchemy import inspect
+        existing = set(inspect(engine).get_table_names())
         if existing:
             pytest.skip(f"database is not empty; refusing destructive setup: {sorted(existing)}")
 
         from opportunity_hunter.db.models import Base
         Base.metadata.create_all(engine)
+        created_schema = True
         sessions = sessionmaker(engine, expire_on_commit=False)
 
         with sessions() as session, session.begin():
@@ -104,7 +107,7 @@ def test_pipeline_runs_against_the_extracted_orm_and_existing_table_contract():
         assert WORKER_LOCK_KEY == 0x50434857
     finally:
         # Drop only the exact OH-owned tables from this fresh, isolated test database.
-        if "engine" in locals():
+        if created_schema:
             from opportunity_hunter.db.models import Base
             Base.metadata.drop_all(engine)
-            engine.dispose()
+        engine.dispose()
