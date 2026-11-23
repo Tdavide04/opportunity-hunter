@@ -4,6 +4,22 @@ Standalone and embeddable marketplace opportunity engine.
 
 This repository contains the marketplace engine extracted from Personal Collection Hub (PCH): canonical listing types, source protocol, orchestration, matching, scoring, deduplication, price history, acquisition runs, notification outbox, circuit breaking and availability maintenance.
 
+## External dependencies
+
+Opportunity Hunter points to these repositories. Each one is an independent module with its own repository, version and licence; the full list, with the pinned commits, is in [`external/`](external/README.md).
+
+| Module | Role | Licence | Extra |
+|---|---|---|---|
+| [subito-scanner](https://github.com/Tdavide04/subito-scanner) | Subito.it search | MIT | `subito` |
+| [vinted-scanner](https://github.com/Tdavide04/vinted-scanner) | Vinted search | GPL-3.0-only | `vinted` |
+| [ebay-scanner](https://github.com/Tdavide04/ebay-scanner) | eBay search | — | planned |
+
+    subito-scanner ───────────┐
+    vinted-scanner ───────────┼──> opportunity-hunter ──> personal-collection-hub
+    ebay-scanner (planned) ───┘
+
+Arrows point from the module to whoever uses it, never back.
+
 ## Architecture
 
 - Standalone: OpportunityHunter owns or receives a PostgreSQL-backed SqlAlchemyStore.

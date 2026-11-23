@@ -1,0 +1,10 @@
+# External dependency of Opportunity Hunter.
+# The install itself comes from pyproject.toml; tests/test_external.py fails if the two disagree.
+name = "subito-scanner"
+repository = "https://github.com/Tdavide04/subito-scanner"
+rev = "2cb97be49a7fd5187a6819c8349d7b26fb72d8d3"
+version = "0.2.0"
+license = "MIT"
+extra = "subito"
+used_by = "opportunity_hunter.sources.subito"
+purpose = "Read-only search of Subito.it listings"
