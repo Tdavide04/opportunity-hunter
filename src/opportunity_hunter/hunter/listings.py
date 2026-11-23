@@ -73,7 +73,7 @@ def upsert_page(session: Session, marketplace: str, candidates: list[ListingCand
             if previous != current:
                 session.add(ListingPriceHistory(listing=listing, price_status=candidate.price_status, price_amount=candidate.price_amount,
                                                 currency=candidate.currency, observed_at=now))
-                if _is_drop(previous, current):
+                if _is_drop(previous, current) and listing.price_amount is not None:
                     price_drops[listing.id] = listing.price_amount
             for name in CANONICAL_FIELDS:
                 setattr(listing, name, getattr(candidate, name))
