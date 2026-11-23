@@ -22,7 +22,7 @@ Constructing OpportunityHunter never creates tables or alters schema. SqlAlchemy
 
 ## Source compatibility
 
-MarketplaceAdapter keeps validate_params(dict) and fetch_page(params, cursor). Scanner-specific models are translated into ListingCandidate by an anti-corruption adapter. Subito Scanner 0.2.0 is supported as an optional extra. Vinted Scanner 0.1.0 still imports pch-marketplace-kit, so it is deliberately not installed or enabled by this package yet.
+MarketplaceAdapter keeps validate_params(dict) and fetch_page(params, cursor). Scanner-specific models are translated into ListingCandidate by an anti-corruption adapter. Subito Scanner 0.2.0 and Vinted Scanner 0.2.0 are optional extras; `opportunity_hunter.sources.common` holds the shared translation (listings, rejected items, cursors and the scanners' errors), and the Vinted adapter also passes through the scanner's filter discovery. Vinted Scanner is GPL-3.0-only (see the README).
 
 ## Operational invariants
 

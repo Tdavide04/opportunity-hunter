@@ -10,8 +10,7 @@ This repository contains the marketplace engine extracted from Personal Collecti
 - Embedded: PCH passes its existing SQLAlchemy Engine or session factory. OH maps the same Hunter tables; no rows are copied.
 - OH never imports PCH. PCH integration is through Engine, source and notification-channel injection.
 - The engine depends only on the persistence ports in `opportunity_hunter.ports` (repositories, Unit of Work, worker lock); `SqlAlchemyStore` provides their PostgreSQL implementation.
-- Subito Scanner 0.2.0 has a built-in optional adapter.
-- Vinted Scanner 0.1.0 is not yet standalone and still imports pch-marketplace-kit. It is deliberately not bundled or enabled here until its standalone extraction is complete.
+- Subito Scanner 0.2.0 and Vinted Scanner 0.2.0 have built-in optional adapters (`opportunity_hunter.sources`), installed with the `subito` and `vinted` extras.
 
 ## Safety boundary
 
@@ -22,7 +21,11 @@ No schema migration, Alembic stamp, production database change or PCH runtime sw
     uv sync
     uv run pytest
 
-Install Subito support with uv sync --extra subito. Vinted support must be injected by an application that supplies a compliant standalone source adapter after the Vinted scanner extraction.
+Install scanner support with `uv sync --extra subito`, `--extra vinted` or `--extra all`. Without an extra, that marketplace is simply unavailable.
+
+## Licences of the extras
+
+Opportunity Hunter is MIT, and so is Subito Scanner. Vinted Scanner is **GPL-3.0-only**: parts of it are ported from VintedScanner by Andrea Draghetti. The `vinted` extra is optional for modularity, not to hide that obligation: anyone who distributes Opportunity Hunter together with Vinted Scanner distributes GPL-3.0 code and must honour the GPL for it.
 
 ## Configuration
 

@@ -16,6 +16,13 @@ dependencies = [
 subito = [
     "subito-scanner @ git+https://github.com/Tdavide04/subito-scanner@2cb97be49a7fd5187a6819c8349d7b26fb72d8d3",
 ]
+# GPL-3.0-only: distributing OH together with this extra distributes GPL code (see README)
+vinted = [
+    "vinted-scanner @ git+https://github.com/Tdavide04/vinted-scanner@89c8cbb27df9f61ff4c9fb50bf577cca06a2d955",
+]
+all = [
+    "opportunity-hunter[subito,vinted]",
+]
 
 [project.scripts]
 opportunity-hunter = "opportunity_hunter.cli:main"
