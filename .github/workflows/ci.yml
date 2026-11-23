@@ -40,3 +40,10 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest
       - run: uv build
+      - name: Install the built wheel with all scanners in a clean venv; it must import nothing of PCH
+        run: |
+          uv venv /tmp/smoke --python ${{ matrix.python }}
+          uv pip install --python /tmp/smoke/bin/python "$(ls dist/*.whl)[all]"
+          /tmp/smoke/bin/opportunity-hunter --version
+          /tmp/smoke/bin/opportunity-hunter --help
+          /tmp/smoke/bin/python -c "import sys, opportunity_hunter.cli, opportunity_hunter.migrations; from opportunity_hunter.sources.subito import default_sources; assert sorted(default_sources()) == ['subito', 'vinted']; bad = [m for m in sys.modules if m.split('.')[0] in ('pch', 'pch_marketplace_kit')]; sys.exit(1 if bad else 0)"

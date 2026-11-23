@@ -7,6 +7,7 @@ from dataclasses import asdict
 from typing import Any
 
 from opportunity_hunter import __version__
+from opportunity_hunter.adapter import PermanentMarketplaceError, TransientMarketplaceError
 from opportunity_hunter.config import OpportunityHunterConfig
 from opportunity_hunter.db.store import SqlAlchemyStore
 from opportunity_hunter.engine import OpportunityHunter
@@ -82,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         store = SqlAlchemyStore(database_url=config.database_url)
         try:
             store.initialize_fresh_database()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         finally:
             store.close()
         print("Fresh standalone schema created at the latest Opportunity Hunter migration.")
@@ -111,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("params_json must decode to an object")
             _json([asdict(item) for item in hunter.preview(args.marketplace, params, args.max_items)])
         return 0
-    except (ValueError, KeyError, LookupError, RuntimeError) as exc:
+    except (ValueError, KeyError, LookupError, RuntimeError, TransientMarketplaceError, PermanentMarketplaceError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     finally:
