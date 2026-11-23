@@ -18,6 +18,10 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init-db", help="create tables in a new, empty standalone database")
     init.add_argument("--yes-empty-db", action="store_true", help="confirm this is a new database with no user tables")
+    sub.add_parser("upgrade-db", help="apply pending Opportunity Hunter migrations (new or already adopted database)")
+    adopt = sub.add_parser("adopt-db", help="stamp existing Hunter tables after checking them against the baseline")
+    adopt.add_argument("--yes-existing-db", action="store_true", help="confirm you have a tested backup of this database")
+    sub.add_parser("check-db", help="print the migration revision and how the Hunter tables differ from the baseline")
     sub.add_parser("run-due", help="run scheduled and manually requested marketplace queries")
     run = sub.add_parser("run-query", help="run one stored Marketplace Query")
     run.add_argument("query_id", type=int)
@@ -28,6 +32,39 @@ def _parser() -> argparse.ArgumentParser:
     preview.add_argument("params_json", help="JSON object with source query parameters")
     preview.add_argument("--max-items", type=int, default=20)
     return parser
+
+
+def _database_command(args: argparse.Namespace, database_url: str | None) -> int:
+    from sqlalchemy import create_engine
+
+    from opportunity_hunter import migrations
+
+    if not database_url:
+        print("OH_DATABASE_URL is required.", file=sys.stderr)
+        return 2
+    if args.command == "adopt-db" and not args.yes_existing_db:
+        print("Refusing: pass --yes-existing-db only after a backup and a test restore of this database.", file=sys.stderr)
+        return 2
+    engine = create_engine(database_url, connect_args={"connect_timeout": 3})
+    try:
+        if args.command == "upgrade-db":
+            migrations.upgrade(engine)
+            print("Opportunity Hunter migrations applied.")
+        elif args.command == "adopt-db":
+            result = migrations.adopt_existing(engine)
+            _json(asdict(result))
+        else:
+            with engine.connect() as connection:
+                revision = migrations.current_revision(connection)
+                differences = migrations.schema_differences(connection) if revision is None else []
+                connection.rollback()
+            _json({"revision": revision, "differences_from_baseline": differences})
+    except migrations.MigrationRefused as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        engine.dispose()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,8 +84,11 @@ def main(argv: list[str] | None = None) -> int:
             store.initialize_fresh_database()
         finally:
             store.close()
-        print("Fresh standalone schema created. This is not an Alembic migration.")
+        print("Fresh standalone schema created at the latest Opportunity Hunter migration.")
         return 0
+
+    if args.command in ("upgrade-db", "adopt-db", "check-db"):
+        return _database_command(args, config.database_url)
 
     try:
         hunter = OpportunityHunter(config=config)

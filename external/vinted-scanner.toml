@@ -1,0 +1,10 @@
+# External dependency of Opportunity Hunter.
+# The install itself comes from pyproject.toml; tests/test_external.py fails if the two disagree.
+name = "vinted-scanner"
+repository = "https://github.com/Tdavide04/vinted-scanner"
+rev = "89c8cbb27df9f61ff4c9fb50bf577cca06a2d955"
+version = "0.2.0"
+license = "GPL-3.0-only"
+extra = "vinted"
+used_by = "opportunity_hunter.sources.vinted"
+purpose = "Read-only search of the Vinted catalogue"

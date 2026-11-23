@@ -2,7 +2,6 @@
 from sqlalchemy import Engine, create_engine, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
-from opportunity_hunter.db import Base
 from opportunity_hunter.db.repositories import SqlAlchemyUnitOfWork, SqlAlchemyWorkerLock
 
 
@@ -39,8 +38,10 @@ class SqlAlchemyStore:
         """Create tables only in a database with no user tables; never use on an existing/embedded database."""
         existing = set(inspect(self.engine).get_table_names())
         if existing:
-            raise RuntimeError("refusing to initialize a non-empty database; use the separately reviewed Alembic procedure")
-        Base.metadata.create_all(self.engine)
+            raise RuntimeError("refusing to initialize a non-empty database; adopt existing tables with adopt-db instead")
+        from opportunity_hunter.migrations import upgrade
+
+        upgrade(self.engine)
 
     def close(self) -> None:
         if self._owns_engine:
