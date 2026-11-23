@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from opportunity_hunter.db.models import Match, MarketplaceQuery, Opportunity, SearchProfile
+from opportunity_hunter.db.models import MarketplaceQuery, Match, Opportunity, SearchProfile
 from opportunity_hunter.hunter.scoring import SCORING_VERSION
 from tests.test_pipeline import clock, fixtures, item, pipeline, session_factory  # noqa: F401  (fixtures)
 
