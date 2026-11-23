@@ -2,10 +2,9 @@
 import pytest
 from sqlalchemy import select
 
-from tests.support import RecordingChannel
 from opportunity_hunter.db.models import AppSetting, MarketplaceQuery, Notification, SearchProfile
 from opportunity_hunter.hunter.pipeline import Pipeline
-from tests.support import FixtureAdapter
+from tests.support import FixtureAdapter, RecordingChannel
 from tests.test_pipeline import T0, clock, fixtures, item, session_factory  # noqa: F401  (fixtures)
 
 
