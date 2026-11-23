@@ -1,6 +1,7 @@
 """SQLAlchemy store: owns a standalone engine or wraps one supplied by PCH."""
 from sqlalchemy import Engine, create_engine, inspect
 from sqlalchemy.orm import Session, sessionmaker
+
 from opportunity_hunter.db import Base
 
 
