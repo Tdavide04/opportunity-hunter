@@ -10,6 +10,7 @@ from sqlalchemy import or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from opportunity_hunter.adapter import MarketplaceAdapter, PermanentMarketplaceError, TransientMarketplaceError
 from opportunity_hunter.channels.base import NotificationChannel
 from opportunity_hunter.db.models import AcquisitionRun, AppSetting, MarketplaceQuery, SearchProfile
 from opportunity_hunter.hunter.availability import maintain
@@ -17,7 +18,6 @@ from opportunity_hunter.hunter.circuit import record_outcome, suspended_until
 from opportunity_hunter.hunter.evaluation import evaluate, profiles_for
 from opportunity_hunter.hunter.listings import upsert_page
 from opportunity_hunter.hunter.notifications import dispatch, enqueue, read_settings
-from opportunity_hunter.adapter import MarketplaceAdapter, PermanentMarketplaceError, TransientMarketplaceError
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,15 @@ class Pipeline:
                 page = adapter.fetch_page(params, cursor)
                 totals["rejected"] += len(page.rejected)
                 for rejected in page.rejected:
-                    logger.warning("listing rejected", extra={"event": "listing_rejected", "external_id": rejected.external_id, "reason": rejected.reason, **log})
+                    logger.warning(
+                        "listing rejected",
+                        extra={
+                            "event": "listing_rejected",
+                            "external_id": rejected.external_id,
+                            "reason": rejected.reason,
+                            **log,
+                        },
+                    )
                 if not page.candidates and not page.rejected:
                     totals["pages"] += 1  # an empty page was still read; saved by _finish
                     break
