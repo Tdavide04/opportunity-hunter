@@ -28,9 +28,15 @@ Arrows point from the module to whoever uses it, never back.
 - The engine depends only on the persistence ports in `opportunity_hunter.ports` (repositories, Unit of Work, worker lock); `SqlAlchemyStore` provides their PostgreSQL implementation.
 - Subito Scanner 0.2.0 and Vinted Scanner 0.2.0 have built-in optional adapters (`opportunity_hunter.sources`), installed with the `subito` and `vinted` extras.
 
-## Safety boundary
+## Database migrations
 
-No schema migration, Alembic stamp, production database change or PCH runtime switch is part of this extraction. The init-db command is a fresh-database bootstrap only and refuses to run when any user tables already exist. Existing databases remain untouched.
+Opportunity Hunter owns the migrations of its nine tables (`opportunity_hunter.migrations`, ADR-0013 phase 5). Its version is kept in `oh_alembic_version`, so a host's own `alembic_version` is never read or written. There is no downgrade.
+
+- New database: `opportunity-hunter init-db --yes-empty-db` (refuses a database with any table), or `upgrade-db`. The `oh0001` baseline creates the tables exactly as Personal Collection Hub had them at its revision `0010`.
+- Existing database that already has the tables (PCH's): `check-db` prints how they differ from the baseline; `adopt-db --yes-existing-db` builds the baseline in a throw-away schema inside a savepoint, compares columns, constraints and indexes, and stamps `oh0001` only on an exact match, with row counts checked before and after, in one transaction. No table, column or row is touched.
+- After that, `upgrade-db` applies later revisions.
+
+Adopting a production database is a separately authorized step: back it up and test the restore first, and run `check-db` and `adopt-db` on the restored copy before the real one.
 
 ## Install
 
@@ -61,4 +67,4 @@ Set OH_DATABASE_URL (PostgreSQL SQLAlchemy URL). Optional Telegram delivery requ
     )
     result = hunter.run_due()
 
-The injected Engine remains caller-owned. Construction never creates or changes tables. Alembic ownership and production stamping are a separately authorized phase.
+The injected Engine remains caller-owned. Construction never creates or changes tables.

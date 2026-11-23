@@ -5,6 +5,7 @@ from sqlalchemy import inspect
 
 from opportunity_hunter.db.models import Base
 from opportunity_hunter.db.store import SqlAlchemyStore
+from opportunity_hunter.migrations import VERSION_TABLE
 
 
 def test_metadata_has_only_hunter_tables():
@@ -19,9 +20,11 @@ def test_fresh_database_bootstrap_is_guarded():
     store = SqlAlchemyStore(database_url=os.environ["OH_TEST_DATABASE_URL"])
     try:
         store.initialize_fresh_database()
-        assert set(inspect(store.engine).get_table_names()) == set(Base.metadata.tables)
+        assert set(inspect(store.engine).get_table_names()) == set(Base.metadata.tables) | {VERSION_TABLE}
         with pytest.raises(RuntimeError, match="non-empty"):
             store.initialize_fresh_database()
         Base.metadata.drop_all(store.engine)
+        with store.engine.begin() as connection:
+            connection.exec_driver_sql(f"DROP TABLE {VERSION_TABLE}")
     finally:
         store.close()
