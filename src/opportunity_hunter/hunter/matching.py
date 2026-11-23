@@ -1,7 +1,7 @@
 """Local matching of a Listing against a Search Profile (ADR-0004). Pure: no I/O."""
 import unicodedata
-from decimal import Decimal
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from opportunity_hunter.db.models import Listing, SearchProfile
