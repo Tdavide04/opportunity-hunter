@@ -1,10 +1,29 @@
 """Opportunity Hunter persistence mappings. Table and column names match the PCH schema."""
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
-from sqlalchemy import ARRAY, BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Identity, Index, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
+
+from sqlalchemy import (
+    ARRAY,
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from opportunity_hunter.db import Base
 from opportunity_hunter.domain import CONDITIONS, PRICE_STATUSES, SHIPPING_STATUSES
 
