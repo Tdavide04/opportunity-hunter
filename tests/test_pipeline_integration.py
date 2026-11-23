@@ -1,6 +1,6 @@
+import os
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-import os
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -47,10 +47,6 @@ class OnePageSource:
 @pytest.mark.skipif(not os.getenv("OH_TEST_DATABASE_URL"), reason="PostgreSQL integration URL not set")
 def test_pipeline_runs_against_the_extracted_orm_and_existing_table_contract():
     engine = create_engine(os.environ["OH_TEST_DATABASE_URL"], pool_pre_ping=True)
-    tables = (
-        "search_profile", "marketplace_query", "acquisition_run", "listing",
-        "match", "opportunity", "notification", "app_setting", "listing_price_history",
-    )
     created_schema = False
     try:
         # CI supplies a fresh dedicated database. Never truncate or drop unknown user tables.
@@ -89,7 +85,9 @@ def test_pipeline_runs_against_the_extracted_orm_and_existing_table_contract():
         with sessions() as session:
             query_id = session.scalar(select(MarketplaceQuery.id))
 
-        clock = lambda: NOW
+        def clock() -> datetime:
+            return NOW
+
         pipeline = Pipeline(sessions, {"subito": OnePageSource()}, now=clock, channels=[])
         summary = pipeline.run_query(query_id)
 
