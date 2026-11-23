@@ -17,7 +17,7 @@ from opportunity_hunter.db.models import (
     SearchProfile,
 )
 from opportunity_hunter.domain import ListingCandidate
-from opportunity_hunter.hunter.pipeline import Pipeline, WORKER_LOCK_KEY
+from opportunity_hunter.hunter.pipeline import WORKER_LOCK_KEY, Pipeline
 
 NOW = datetime(2026, 11, 23, 10, 0, tzinfo=UTC)
 
