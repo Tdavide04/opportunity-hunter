@@ -8,7 +8,13 @@ from sqlalchemy.orm import sessionmaker
 
 from opportunity_hunter.adapter import Page
 from opportunity_hunter.db.models import (
-    AcquisitionRun, Listing, ListingPriceHistory, MarketplaceQuery, Match, Opportunity, SearchProfile,
+    AcquisitionRun,
+    Listing,
+    ListingPriceHistory,
+    MarketplaceQuery,
+    Match,
+    Opportunity,
+    SearchProfile,
 )
 from opportunity_hunter.domain import ListingCandidate
 from opportunity_hunter.hunter.pipeline import Pipeline, WORKER_LOCK_KEY
