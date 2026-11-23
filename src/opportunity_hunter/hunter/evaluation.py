@@ -101,6 +101,7 @@ def evaluate(
             elif (
                 row.opportunity is not None and result.matched and previous_price is not None
                 and row.opportunity.status != "acquired"
+                and listing.price_amount is not None
                 and drop_percent(previous_price, listing.price_amount) >= drop_min_percent
             ):
                 outcome.price_drops.append((row.opportunity, f"price_drop:{listing.price_amount:.2f}"))
