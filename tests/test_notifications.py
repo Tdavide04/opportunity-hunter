@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from opportunity_hunter.db.models import AppSetting, MarketplaceQuery, Notification, SearchProfile
 from opportunity_hunter.hunter.pipeline import Pipeline
-from tests.support import FixtureAdapter, RecordingChannel
+from tests.support import FixtureAdapter, RecordingChannel, sqlalchemy_ports
 from tests.test_pipeline import T0, clock, fixtures, item, session_factory  # noqa: F401  (fixtures)
 
 
@@ -15,7 +15,7 @@ def channel():
 
 @pytest.fixture
 def pipeline(session_factory, tmp_path, clock, channel):
-    return Pipeline(session_factory, {"fixture": FixtureAdapter(tmp_path)}, now=clock, channels=[channel], max_attempts=3)
+    return Pipeline(*sqlalchemy_ports(session_factory), {"fixture": FixtureAdapter(tmp_path)}, now=clock, channels=[channel], max_attempts=3)
 
 
 @pytest.fixture
@@ -156,7 +156,7 @@ def test_a_failed_or_dry_baseline_does_not_complete_the_baseline(pipeline, add_q
 
 
 def test_without_channels_no_notifications_are_created(session_factory, tmp_path, clock, add_query):
-    bare = Pipeline(session_factory, {"fixture": FixtureAdapter(tmp_path)}, now=clock)
+    bare = Pipeline(*sqlalchemy_ports(session_factory), {"fixture": FixtureAdapter(tmp_path)}, now=clock)
     summary = bare.run_query(add_query([{"items": [item("a1")]}]))
     assert summary.opportunities == 1
     assert notifications(session_factory) == []

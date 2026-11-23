@@ -1,8 +1,9 @@
-"""SQLAlchemy store: owns a standalone engine or wraps one supplied by PCH."""
+"""SQLAlchemy store: owns a standalone engine or wraps one supplied by the host (PCH), and hands out the ports."""
 from sqlalchemy import Engine, create_engine, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from opportunity_hunter.db import Base
+from opportunity_hunter.db.repositories import SqlAlchemyUnitOfWork, SqlAlchemyWorkerLock
 
 
 class SqlAlchemyStore:
@@ -28,6 +29,11 @@ class SqlAlchemyStore:
             assert engine is not None
             self.engine = engine
             self.session_factory = sessionmaker(engine, expire_on_commit=False)
+        self.worker_lock = SqlAlchemyWorkerLock(self.engine)
+
+    def unit_of_work(self) -> SqlAlchemyUnitOfWork:
+        """A new Unit of Work on this store's session factory (the host's own, in embedded mode)."""
+        return SqlAlchemyUnitOfWork(self.session_factory)
 
     def initialize_fresh_database(self) -> None:
         """Create tables only in a database with no user tables; never use on an existing/embedded database."""

@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from opportunity_hunter.db.models import AcquisitionRun, AppSetting
 from opportunity_hunter.hunter.circuit import marketplace_states
+from tests.support import sqlalchemy_ports
 from tests.test_notifications import add_query, channel, pipeline, set_setting  # noqa: F401  (fixtures)
 from tests.test_pipeline import clock, fixtures, item, session_factory  # noqa: F401  (fixtures)
 
@@ -15,8 +16,9 @@ def runs(session_factory) -> int:
 
 
 def states(session_factory, clock):
-    with session_factory() as session:  # closed at once: an open transaction would block the cleanup TRUNCATE
-        return marketplace_states(session, clock.current)
+    unit_of_work, _ = sqlalchemy_ports(session_factory)
+    with unit_of_work() as uow:  # closed at once: an open transaction would block the cleanup TRUNCATE
+        return marketplace_states(uow, clock.current)
 
 
 def pass_after(pipeline, clock, minutes=61):

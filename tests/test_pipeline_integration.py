@@ -18,6 +18,7 @@ from opportunity_hunter.db.models import (
 )
 from opportunity_hunter.domain import ListingCandidate
 from opportunity_hunter.hunter.pipeline import WORKER_LOCK_KEY, Pipeline
+from tests.support import sqlalchemy_ports
 
 NOW = datetime(2026, 11, 23, 10, 0, tzinfo=UTC)
 
@@ -94,7 +95,7 @@ def test_pipeline_runs_against_the_extracted_orm_and_existing_table_contract():
         def clock() -> datetime:
             return NOW
 
-        pipeline = Pipeline(sessions, {"subito": OnePageSource()}, now=clock, channels=[])
+        pipeline = Pipeline(*sqlalchemy_ports(sessions), {"subito": OnePageSource()}, now=clock, channels=[])
         summary = pipeline.run_query(query_id)
 
         assert (summary.status, summary.pages, summary.seen, summary.new, summary.updated) == ("succeeded", 1, 1, 1, 0)

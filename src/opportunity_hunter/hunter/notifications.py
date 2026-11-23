@@ -5,12 +5,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session, joinedload, sessionmaker
-
 from opportunity_hunter.channels.base import ChannelError, NotificationChannel, OutgoingMessage
-from opportunity_hunter.db.models import AppSetting, Listing, ListingPriceHistory, Match, Notification, Opportunity
+from opportunity_hunter.db.models import Listing, Notification, Opportunity
+from opportunity_hunter.ports import PriceHistoryRepository, SettingsStore, UnitOfWork, UnitOfWorkFactory
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +25,12 @@ SETTING_DEFAULTS: dict[str, Any] = {
 PRICE_STATUS_TEXT = {"free": "Gratis", "on_request": "Su richiesta", "missing": "Prezzo mancante"}
 
 
-def read_settings(session: Session) -> dict[str, Any]:
-    stored = {row.key: row.value for row in session.scalars(select(AppSetting).where(AppSetting.key.in_(SETTING_DEFAULTS)))}
-    return {**SETTING_DEFAULTS, **stored}
+def read_settings(settings: SettingsStore) -> dict[str, Any]:
+    return {**SETTING_DEFAULTS, **settings.get_many(SETTING_DEFAULTS)}
 
 
 def enqueue(
-    session: Session,
+    uow: UnitOfWork,
     opportunities: Sequence[Opportunity],
     channels: Sequence[NotificationChannel],
     suppressed_reason: str | None,
@@ -49,20 +45,17 @@ def enqueue(
     status = "suppressed" if suppressed_reason else "pending"
     for opportunity in opportunities:
         for channel in channels:
-            session.add(Notification(
-                opportunity=opportunity, channel=channel.name, reason=NEW_OPPORTUNITY,
-                status=status, suppressed_reason=suppressed_reason, created_at=now,
-            ))
+            uow.outbox.add(opportunity, channel.name, NEW_OPPORTUNITY, status, suppressed_reason, now)
     rows = [
         {"opportunity_id": opportunity.id, "channel": channel.name, "reason": reason, "status": status,
          "suppressed_reason": suppressed_reason, "created_at": now, "attempts": 0}
         for opportunity, reason in price_drops for channel in channels
     ]
     if rows:
-        session.execute(insert(Notification).values(rows).on_conflict_do_nothing(constraint="uq_notification_opportunity_channel_reason"))
+        uow.outbox.add_ignoring_duplicates(rows)
 
 
-def dispatch(session_factory: sessionmaker[Session], channels: Sequence[NotificationChannel], max_attempts: int, now: datetime) -> dict[str, int]:
+def dispatch(unit_of_work: UnitOfWorkFactory, channels: Sequence[NotificationChannel], max_attempts: int, now: datetime) -> dict[str, int]:
     """Send pending Notifications and retry failed ones below max_attempts. Each in its own short transaction.
 
     If notifications are paused when this runs, waiting ones become suppressed instead of piling up.
@@ -72,67 +65,64 @@ def dispatch(session_factory: sessionmaker[Session], channels: Sequence[Notifica
     result = {"sent": 0, "failed": 0}
     if not by_name:
         return result
-    with session_factory() as session:
-        settings = read_settings(session)
+    with unit_of_work() as uow:
+        settings = read_settings(uow.settings)
         paused = settings["notifications_paused"]
         shadow = set(settings["shadow_marketplaces"])
-        ids = list(session.scalars(
-            select(Notification.id)
-            .where(Notification.channel.in_(by_name))
-            .where((Notification.status == "pending") | ((Notification.status == "failed") & (Notification.attempts < max_attempts)))
-            .order_by(Notification.id)
-        ))
+        ids = uow.outbox.deliverable_ids(by_name, max_attempts)
     for notification_id in ids:
-        with session_factory() as session, session.begin():
-            row = session.scalars(
-                select(Notification).where(Notification.id == notification_id).with_for_update(skip_locked=True, of=Notification)
-                .options(joinedload(Notification.opportunity).joinedload(Opportunity.match).joinedload(Match.listing),
-                         joinedload(Notification.opportunity).joinedload(Opportunity.match).joinedload(Match.search_profile))
-            ).first()
-            if row is None or row.status not in ("pending", "failed"):
-                continue
-            if paused:
-                row.status, row.suppressed_reason = "suppressed", "paused"
-                continue
-            if row.opportunity.match.listing.marketplace in shadow:
-                # Shadow Mode turned on after the Notification was written: the Legacy Scanner still notifies
-                row.status, row.suppressed_reason = "suppressed", "shadow_mode"
-                continue
-            row.attempts += 1
-            try:
-                by_name[row.channel].send(to_message(row.opportunity, price_drop_note(session, row)))
-            except ChannelError as exc:
-                row.status, row.last_error = "failed", str(exc)
-                result["failed"] += 1
-                logger.warning(
-                    "notification failed",
-                    extra={
-                        "event": "notification_failed",
-                        "notification_id": row.id,
-                        "channel": row.channel,
-                        "attempt": row.attempts,
-                        "error": str(exc),
-                    },
-                )
-                continue
-            row.status, row.last_error, row.sent_at = "sent", None, now
-            result["sent"] += 1
+        with unit_of_work() as uow:
+            outcome = _deliver(uow, notification_id, by_name, paused, shadow, now)
+            uow.commit()
+        if outcome is not None:
+            result[outcome] += 1
     return result
 
 
-def price_drop_note(session: Session, notification: Notification) -> str | None:
+def _deliver(
+    uow: UnitOfWork, notification_id: int, by_name: dict[str, NotificationChannel], paused: bool, shadow: set[str], now: datetime
+) -> str | None:
+    """Deliver or suppress one Notification inside the caller's Unit of Work: 'sent', 'failed' or None (nothing sent)."""
+    row = uow.outbox.claim(notification_id)
+    if row is None or row.status not in ("pending", "failed"):
+        return None
+    if paused:
+        row.status, row.suppressed_reason = "suppressed", "paused"
+        return None
+    if row.opportunity.match.listing.marketplace in shadow:
+        # Shadow Mode turned on after the Notification was written: the Legacy Scanner still notifies
+        row.status, row.suppressed_reason = "suppressed", "shadow_mode"
+        return None
+    row.attempts += 1
+    try:
+        by_name[row.channel].send(to_message(row.opportunity, price_drop_note(uow.price_history, row)))
+    except ChannelError as exc:
+        row.status, row.last_error = "failed", str(exc)
+        logger.warning(
+            "notification failed",
+            extra={
+                "event": "notification_failed",
+                "notification_id": row.id,
+                "channel": row.channel,
+                "attempt": row.attempts,
+                "error": str(exc),
+            },
+        )
+        return "failed"
+    row.status, row.last_error, row.sent_at = "sent", None, now
+    return "sent"
+
+
+def price_drop_note(history: PriceHistoryRepository, notification: Notification) -> str | None:
     """'Prezzo sceso da X a Y': Y comes from the reason, X is the observation before Y in the price history."""
     if not notification.reason.startswith(f"{PRICE_DROP}:"):
         return None
     amount = Decimal(notification.reason.split(":", 1)[1])
     listing = notification.opportunity.match.listing
-    observations = list(session.scalars(
-        select(ListingPriceHistory).where(ListingPriceHistory.listing_id == listing.id).order_by(ListingPriceHistory.observed_at, ListingPriceHistory.id)
-    ))
-    at = max((i for i, o in enumerate(observations) if o.price_amount == amount), default=None)
-    previous = next((o for o in reversed(observations[:at]) if o.price_amount is not None), None) if at else None
+    observations = history.amounts(listing.id)
+    at = max((i for i, observed in enumerate(observations) if observed == amount), default=None)
+    previous_amount = next((observed for observed in reversed(observations[:at]) if observed is not None), None) if at else None
     new = _money(amount, listing.currency)
-    previous_amount = previous.price_amount if previous is not None else None
     if previous_amount is not None:
         return f"Prezzo sceso da {_money(previous_amount, None)} a {new}"
     return f"Prezzo sceso a {new}"

@@ -14,9 +14,17 @@ from opportunity_hunter.adapter import (
     TransientMarketplaceError,
 )
 from opportunity_hunter.channels.base import ChannelError, OutgoingMessage
+from opportunity_hunter.db.store import SqlAlchemyStore
 from opportunity_hunter.domain import ListingCandidate
+from opportunity_hunter.ports import UnitOfWorkFactory, WorkerLock
 
 _FIXTURE_NAME = re.compile(r"[a-z0-9_-]{1,64}")
+
+
+def sqlalchemy_ports(session_factory: Any) -> tuple[UnitOfWorkFactory, WorkerLock]:
+    """The Pipeline's persistence ports on a host-supplied session factory, as PCH will hand them over."""
+    store = SqlAlchemyStore(session_factory=session_factory)
+    return store.unit_of_work, store.worker_lock
 
 
 class FixtureAdapter:

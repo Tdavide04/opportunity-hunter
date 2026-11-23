@@ -3,12 +3,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
-from opportunity_hunter.db.models import Listing, ListingPriceHistory, MarketplaceQuery, Match, Opportunity, SearchProfile
+from opportunity_hunter.db.models import Listing, Match, Opportunity, SearchProfile
 from opportunity_hunter.hunter.matching import match
 from opportunity_hunter.hunter.scoring import SCORING_VERSION, drop_percent, score
+from opportunity_hunter.ports import PriceHistoryRepository, SearchProfileRepository, UnitOfWork
 
 
 @dataclass
@@ -17,39 +15,28 @@ class Evaluation:
     price_drops: list[tuple[Opportunity, str]] = field(default_factory=list)  # (existing Opportunity, price_drop:<amount>)
 
 
-def profiles_for(session: Session, marketplace: str) -> list[SearchProfile]:
+def profiles_for(profiles: SearchProfileRepository, marketplace: str) -> list[SearchProfile]:
     """Active Search Profiles with at least one Marketplace Query on this Marketplace."""
-    on_marketplace = select(MarketplaceQuery.search_profile_id).where(MarketplaceQuery.marketplace == marketplace)
-    return list(session.scalars(select(SearchProfile).where(SearchProfile.status == "active", SearchProfile.id.in_(on_marketplace))))
+    return profiles.active_profiles_for(marketplace)
 
 
-def previous_prices(session: Session, listing_ids: list[int]) -> dict[int, Decimal]:
+def previous_prices(history: PriceHistoryRepository, listing_ids: list[int]) -> dict[int, Decimal]:
     """Listings whose latest observed price is lower than the one before (same currency): listing id -> previous amount.
 
     Read from the price history so the Price Drop factor is the same whenever the pair is re-evaluated.
     """
-    ranked = (
-        select(
-            ListingPriceHistory.listing_id, ListingPriceHistory.price_amount, ListingPriceHistory.currency,
-            func.row_number().over(
-                partition_by=ListingPriceHistory.listing_id, order_by=(ListingPriceHistory.observed_at.desc(), ListingPriceHistory.id.desc())
-            ).label("rank"),
-        )
-        .where(ListingPriceHistory.listing_id.in_(listing_ids))
-        .subquery()
-    )
-    latest: dict[int, list] = {}
-    for listing_id, amount, currency, _ in session.execute(select(ranked).where(ranked.c.rank <= 2).order_by(ranked.c.listing_id, ranked.c.rank)):
-        latest.setdefault(listing_id, []).append((amount, currency))
-    return {
-        listing_id: rows[1][0]
-        for listing_id, rows in latest.items()
-        if len(rows) == 2 and None not in (rows[0][0], rows[1][0]) and rows[0][1] == rows[1][1] and rows[0][0] < rows[1][0]
-    }
+    drops: dict[int, Decimal] = {}
+    for listing_id, rows in history.latest_two(listing_ids).items():
+        if len(rows) != 2:
+            continue
+        (current, current_currency), (previous, previous_currency) = rows
+        if current is not None and previous is not None and current_currency == previous_currency and current < previous:
+            drops[listing_id] = previous
+    return drops
 
 
 def evaluate(
-    session: Session,
+    uow: UnitOfWork,
     listings: list[Listing],
     changed: list[Listing],
     profiles: list[SearchProfile],
@@ -69,15 +56,10 @@ def evaluate(
     outcome = Evaluation()
     if not listings or not profiles:
         return outcome
-    known = {
-        (m.search_profile_id, m.listing_id): m
-        for m in session.scalars(
-            select(Match).where(Match.listing_id.in_([lst.id for lst in listings]), Match.search_profile_id.in_([p.id for p in profiles]))
-        )
-    }
+    known = {(m.search_profile_id, m.listing_id): m for m in uow.matches.for_pairs([lst.id for lst in listings], [p.id for p in profiles])}
     changed_ids = {lst.id for lst in changed}
-    session.flush()  # this page's price history rows must be visible to previous_prices
-    dropped_from = previous_prices(session, [lst.id for lst in listings])
+    uow.flush()  # this page's price history rows must be visible to previous_prices
+    dropped_from = previous_prices(uow.price_history, [lst.id for lst in listings])
     for listing in listings:
         for profile in profiles:
             row = known.get((profile.id, listing.id))
@@ -88,7 +70,7 @@ def evaluate(
             previous_price = price_drops.get(listing.id)
             if row is None:
                 row = Match(search_profile_id=profile.id, listing_id=listing.id)
-                session.add(row)
+                uow.matches.add(row)
             row.matched = result.matched
             row.reasons = result.reasons
             row.score = value
@@ -96,8 +78,7 @@ def evaluate(
             row.scoring_version = SCORING_VERSION
             row.evaluated_at = now
             if value is not None and value >= profile.score_threshold and row.opportunity is None:
-                row.opportunity = Opportunity(status="new", status_changed_at=now, created_at=now)
-                outcome.created.append(row.opportunity)
+                outcome.created.append(uow.opportunities.create(row, now))
             elif (
                 row.opportunity is not None and result.matched and previous_price is not None
                 and row.opportunity.status != "acquired"

@@ -9,6 +9,7 @@ This repository contains the marketplace engine extracted from Personal Collecti
 - Standalone: OpportunityHunter owns or receives a PostgreSQL-backed SqlAlchemyStore.
 - Embedded: PCH passes its existing SQLAlchemy Engine or session factory. OH maps the same Hunter tables; no rows are copied.
 - OH never imports PCH. PCH integration is through Engine, source and notification-channel injection.
+- The engine depends only on the persistence ports in `opportunity_hunter.ports` (repositories, Unit of Work, worker lock); `SqlAlchemyStore` provides their PostgreSQL implementation.
 - Subito Scanner 0.2.0 has a built-in optional adapter.
 - Vinted Scanner 0.1.0 is not yet standalone and still imports pch-marketplace-kit. It is deliberately not bundled or enabled here until its standalone extraction is complete.
 

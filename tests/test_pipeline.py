@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from opportunity_hunter.db.models import AcquisitionRun, Listing, MarketplaceQuery, SearchProfile
 from opportunity_hunter.hunter.pipeline import Pipeline
-from tests.support import FixtureAdapter
+from tests.support import FixtureAdapter, sqlalchemy_ports
 
 T0 = datetime(2026, 11, 21, 9, 0, tzinfo=UTC)
 
@@ -57,7 +57,7 @@ def clock():
 
 @pytest.fixture
 def pipeline(session_factory, tmp_path, clock):
-    return Pipeline(session_factory, {"fixture": FixtureAdapter(tmp_path)}, now=clock)
+    return Pipeline(*sqlalchemy_ports(session_factory), {"fixture": FixtureAdapter(tmp_path)}, now=clock)
 
 
 @pytest.fixture
@@ -202,7 +202,7 @@ def test_unexpected_error_is_recorded_and_raised(session_factory, make_query, cl
 
     query_id = make_query("anything")
     with pytest.raises(RuntimeError):
-        Pipeline(session_factory, {"fixture": Broken()}, now=clock).run_query(query_id)
+        Pipeline(*sqlalchemy_ports(session_factory), {"fixture": Broken()}, now=clock).run_query(query_id)
 
     (run,) = runs(session_factory)
     assert (run.status, run.error_kind) == ("failed", "internal")

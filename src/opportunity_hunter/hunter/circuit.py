@@ -7,11 +7,9 @@ its queries, manual scans included, until then. Failing again after expiry suspe
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from opportunity_hunter.db.models import AcquisitionRun, AppSetting, MarketplaceQuery
+from opportunity_hunter.db.models import AcquisitionRun
 from opportunity_hunter.hunter.notifications import read_settings
+from opportunity_hunter.ports import RunRepository, SettingsStore, UnitOfWork
 
 PERMANENT_FAILURES_TO_SUSPEND = 2
 RECENT_RUNS = 20
@@ -30,13 +28,8 @@ def _key(marketplace: str) -> str:
     return f"circuit:{marketplace}"
 
 
-def _recent_runs(session: Session, marketplace: str) -> list[AcquisitionRun]:
-    return list(session.scalars(
-        select(AcquisitionRun).join(MarketplaceQuery)
-        .where(MarketplaceQuery.marketplace == marketplace, AcquisitionRun.status != "running")
-        .order_by(AcquisitionRun.started_at.desc(), AcquisitionRun.id.desc())
-        .limit(RECENT_RUNS)
-    ))
+def _recent_runs(runs: RunRepository, marketplace: str) -> list[AcquisitionRun]:
+    return runs.recent_finished(marketplace, RECENT_RUNS)
 
 
 def _failure_streak(runs: list[AcquisitionRun]) -> list[str | None]:
@@ -49,34 +42,31 @@ def _failure_streak(runs: list[AcquisitionRun]) -> list[str | None]:
     return streak
 
 
-def suspended_until(session: Session, marketplace: str, now: datetime) -> datetime | None:
-    row = session.get(AppSetting, _key(marketplace))
-    until = datetime.fromisoformat(row.value["suspended_until"]) if row else None
+def suspended_until(settings: SettingsStore, marketplace: str, now: datetime) -> datetime | None:
+    value = settings.get(_key(marketplace))
+    until = datetime.fromisoformat(value["suspended_until"]) if value else None
     return until if until and until > now else None
 
 
-def record_outcome(session: Session, marketplace: str, now: datetime) -> datetime | None:
+def record_outcome(uow: UnitOfWork, marketplace: str, now: datetime) -> datetime | None:
     """Call after a run of this Marketplace finished; returns the new suspension end if it tripped."""
-    settings = read_settings(session)
-    streak = _failure_streak(_recent_runs(session, marketplace))
+    settings = read_settings(uow.settings)
+    streak = _failure_streak(_recent_runs(uow.runs, marketplace))
     tripped = len(streak) >= settings["circuit_failures"] or streak.count("permanent") >= PERMANENT_FAILURES_TO_SUSPEND
     if not tripped:
         if not streak:
-            row = session.get(AppSetting, _key(marketplace))
-            if row is not None:
-                session.delete(row)
+            uow.settings.delete(_key(marketplace))
         return None
     until = now + timedelta(minutes=settings["circuit_suspend_minutes"])
-    session.merge(AppSetting(key=_key(marketplace), value={"suspended_until": until.isoformat(), "failures": len(streak)}))
+    uow.settings.put(_key(marketplace), {"suspended_until": until.isoformat(), "failures": len(streak)})
     return until
 
 
-def marketplace_states(session: Session, now: datetime) -> list[MarketplaceState]:
+def marketplace_states(uow: UnitOfWork, now: datetime) -> list[MarketplaceState]:
     """One entry per Marketplace that has Marketplace Queries."""
-    names = session.scalars(select(MarketplaceQuery.marketplace).distinct().order_by(MarketplaceQuery.marketplace))
     states = []
-    for name in names:
-        runs = _recent_runs(session, name)
-        until = suspended_until(session, name, now)
+    for name in uow.profiles.marketplaces():
+        runs = _recent_runs(uow.runs, name)
+        until = suspended_until(uow.settings, name, now)
         states.append(MarketplaceState(name, until is not None, until, len(_failure_streak(runs)), runs[0] if runs else None))
     return states

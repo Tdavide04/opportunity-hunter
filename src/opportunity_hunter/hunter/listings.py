@@ -5,11 +5,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from opportunity_hunter.db.models import Listing, ListingPriceHistory
+from opportunity_hunter.db.models import Listing
 from opportunity_hunter.domain import ListingCandidate
+from opportunity_hunter.ports import UnitOfWork
 
 # canonical fields copied onto the Listing; raw_payload is stored but kept out of the hash (volatile counters)
 CANONICAL_FIELDS = (
@@ -35,19 +33,14 @@ def content_hash(candidate: ListingCandidate) -> str:
     return hashlib.sha256(json.dumps(canonical, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def upsert_page(session: Session, marketplace: str, candidates: list[ListingCandidate], run_id: int, now: datetime) -> PageCounts:
+def upsert_page(uow: UnitOfWork, marketplace: str, candidates: list[ListingCandidate], run_id: int, now: datetime) -> PageCounts:
     """Insert new Listings, rewrite changed ones, touch Last Seen on all. Caller owns the transaction.
 
     shortcut: select-then-write instead of INSERT ... ON CONFLICT, safe while one sequential worker writes
     Listings (ADR-0001); revisit if acquisitions ever run concurrently.
     """
     by_id = {c.external_id: c for c in candidates}  # last occurrence wins within a page
-    known = {
-        lst.external_id: lst
-        for lst in session.scalars(
-            select(Listing).where(Listing.marketplace == marketplace, Listing.external_id.in_(by_id)).with_for_update()
-        )
-    }
+    known = uow.listings.lock_known(marketplace, by_id)
     new = updated = unchanged = 0
     changed: list[Listing] = []
     seen: list[Listing] = []
@@ -58,7 +51,7 @@ def upsert_page(session: Session, marketplace: str, candidates: list[ListingCand
         listing = known.get(external_id)
         if listing is None:
             listing = Listing(marketplace=marketplace, external_id=external_id, first_seen_at=now)
-            session.add(listing)
+            uow.listings.add(listing)
             new += 1
         elif listing.content_hash == digest and listing.origin == "acquired":
             unchanged += 1
@@ -71,8 +64,7 @@ def upsert_page(session: Session, marketplace: str, candidates: list[ListingCand
             previous = (listing.price_status, listing.price_amount, listing.currency)
             current = (candidate.price_status, candidate.price_amount, candidate.currency)
             if previous != current:
-                session.add(ListingPriceHistory(listing=listing, price_status=candidate.price_status, price_amount=candidate.price_amount,
-                                                currency=candidate.currency, observed_at=now))
+                uow.price_history.record(listing, candidate.price_status, candidate.price_amount, candidate.currency, now)
                 if _is_drop(previous, current) and listing.price_amount is not None:
                     price_drops[listing.id] = listing.price_amount
             for name in CANONICAL_FIELDS:
@@ -84,7 +76,7 @@ def upsert_page(session: Session, marketplace: str, candidates: list[ListingCand
         listing.last_seen_at = now
         listing.last_seen_run_id = run_id
         listing.availability = "active"
-    session.flush()  # assign ids to new Listings before they are evaluated
+    uow.flush()  # assign ids to new Listings before they are evaluated
     return PageCounts(new=new, updated=updated, unchanged=unchanged, changed=changed, seen=seen, price_drops=price_drops, promoted=promoted)
 
 

@@ -18,6 +18,7 @@ class OpportunityHunter:
     """Run standalone or embed against an existing SQLAlchemy Engine.
 
     In embedded mode PCH injects its Engine/session factory, source adapters and notification channels.
+    The pipeline only sees the persistence ports (Unit of Work, worker lock) that the store hands out.
     Construction never creates, migrates or changes tables.
     """
 
@@ -51,7 +52,8 @@ class OpportunityHunter:
             )
         self.sources = dict(default_sources() if sources is None else sources)
         self.pipeline = Pipeline(
-            self.store.session_factory,
+            self.store.unit_of_work,
+            self.store.worker_lock,
             self.sources,
             now=now,
             channels=channels,

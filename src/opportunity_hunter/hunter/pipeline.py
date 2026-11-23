@@ -1,28 +1,23 @@
 """Opportunity Hunter pipeline: the main seam. Runs Marketplace Queries into Acquisition Runs and Listings."""
 import logging
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select, text, update
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
-
 from opportunity_hunter.adapter import MarketplaceAdapter, PermanentMarketplaceError, TransientMarketplaceError
 from opportunity_hunter.channels.base import NotificationChannel
-from opportunity_hunter.db.models import AcquisitionRun, AppSetting, MarketplaceQuery, SearchProfile
 from opportunity_hunter.hunter.availability import maintain
 from opportunity_hunter.hunter.circuit import record_outcome, suspended_until
 from opportunity_hunter.hunter.evaluation import evaluate, profiles_for
 from opportunity_hunter.hunter.listings import upsert_page
 from opportunity_hunter.hunter.notifications import dispatch, enqueue, read_settings
+from opportunity_hunter.ports import WORKER_LOCK_KEY, RunRepository, UnitOfWorkFactory, WorkerLock
+
+__all__ = ["WORKER_LOCK_KEY", "DueResult", "Pipeline", "RunSummary", "utcnow"]
 
 logger = logging.getLogger(__name__)
-
-# PostgreSQL advisory lock held by the one worker allowed to acquire at a time (ADR-0001)
-WORKER_LOCK_KEY = 0x50434857  # "PCHW"
 
 
 def utcnow() -> datetime:
@@ -53,15 +48,19 @@ class DueResult:
 
 
 class Pipeline:
+    """Depends only on the persistence ports: a Unit of Work factory and the worker lock (ADR-0013)."""
+
     def __init__(
         self,
-        session_factory: sessionmaker[Session],
+        unit_of_work: UnitOfWorkFactory,
+        worker_lock: WorkerLock,
         registry: dict[str, MarketplaceAdapter],
         now: Callable[[], datetime] = utcnow,
         channels: list[NotificationChannel] | None = None,
         max_attempts: int = 5,
     ):
-        self.session_factory = session_factory
+        self.unit_of_work = unit_of_work
+        self._worker_lock = worker_lock
         self.registry = registry
         self.now = now
         self.channels = channels or []
@@ -69,7 +68,7 @@ class Pipeline:
 
     def dispatch(self) -> dict[str, int]:
         """Deliver pending Notifications (after the runs committed them) and retry failed ones."""
-        return dispatch(self.session_factory, self.channels, self.max_attempts, self.now())
+        return dispatch(self.unit_of_work, self.channels, self.max_attempts, self.now())
 
     def run_query(self, marketplace_query_id: int, *, dry_run: bool = False) -> RunSummary:
         """Run one Marketplace Query as an Acquisition Run; one transaction per page.
@@ -77,12 +76,12 @@ class Pipeline:
         Returns `skipped` (and records nothing) when the query already has a running run.
         Unexpected exceptions are recorded on the run as `internal` and re-raised.
         """
-        with self.session_factory() as session:
-            query = session.get(MarketplaceQuery, marketplace_query_id)
+        with self.unit_of_work() as uow:
+            query = uow.profiles.get_query(marketplace_query_id)
             if query is None:
                 raise LookupError(f"Marketplace Query {marketplace_query_id} not found")
             marketplace, params, max_pages = query.marketplace, dict(query.params), query.max_pages
-            settings = read_settings(session)
+            settings = read_settings(uow.settings)
             drop_min_percent = Decimal(str(settings["price_drop_min_percent"]))
             dry_run = dry_run or settings["dry_run"]
             baseline = query.baseline_completed_at is None
@@ -97,17 +96,11 @@ class Pipeline:
                 suppressed = "baseline"
             else:
                 suppressed = None
-            started_at = self.now()
-            run = AcquisitionRun(marketplace_query_id=marketplace_query_id, status="running", started_at=started_at, dry_run=dry_run)
-            session.add(run)
-            query.last_started_at = started_at
-            query.manual_run_requested_at = None
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
+            run = uow.runs.start(query, self.now(), dry_run)
+            if run is None:
                 logger.info("run skipped: query already running", extra={"event": "run_skipped", "marketplace_query_id": marketplace_query_id})
                 return RunSummary(run_id=None, status="skipped", marketplace_query_id=marketplace_query_id)
+            uow.commit()
             run_id = run.id
 
         log = {"run_id": run_id, "marketplace": marketplace, "marketplace_query_id": marketplace_query_id}
@@ -133,25 +126,26 @@ class Pipeline:
                 if not page.candidates and not page.rejected:
                     totals["pages"] += 1  # an empty page was still read; saved by _finish
                     break
-                with self.session_factory() as session, session.begin():
+                with self.unit_of_work() as uow:
                     now = self.now()
-                    counts = upsert_page(session, marketplace, page.candidates, run_id, now)
+                    counts = upsert_page(uow, marketplace, page.candidates, run_id, now)
                     # profiles are re-read per page so edits made during a long run apply from the next page
                     outcome = evaluate(
-                        session, counts.seen, counts.changed, profiles_for(session, marketplace), now, counts.price_drops, drop_min_percent
+                        uow, counts.seen, counts.changed, profiles_for(uow.profiles, marketplace), now, counts.price_drops, drop_min_percent
                     )
                     # same transaction as the Opportunities (ADR-0003); a Legacy Seen Listing was already notified by the
                     # Legacy Scanner, so its Opportunities are recorded as suppressed
                     legacy = [o for o in outcome.created if o.match.listing_id in counts.promoted]
                     fresh = [o for o in outcome.created if o.match.listing_id not in counts.promoted]
-                    enqueue(session, fresh, self.channels, suppressed, now, outcome.price_drops)
-                    enqueue(session, legacy, self.channels, suppressed or "legacy_seen", now)
+                    enqueue(uow, fresh, self.channels, suppressed, now, outcome.price_drops)
+                    enqueue(uow, legacy, self.channels, suppressed or "legacy_seen", now)
                     totals["opportunities"] += len(outcome.created)
                     totals["pages"] += 1
                     totals["seen"] += len({c.external_id for c in page.candidates})
                     totals["new"] += counts.new
                     totals["updated"] += counts.updated
-                    self._save_progress(session, run_id, totals)
+                    self._save_progress(uow.runs, run_id, totals)
+                    uow.commit()
                 fully_unchanged = page.candidates and counts.new == counts.updated == 0
                 if page.next_cursor is None or (page.newest_first and fully_unchanged):
                     break
@@ -186,50 +180,35 @@ class Pipeline:
             self._close_abandoned_runs()
             summaries = []
             for query_id, marketplace in self._due_queries():
-                with self.session_factory() as session:
-                    if suspended_until(session, marketplace, self.now()):
+                with self.unit_of_work() as uow:
+                    if suspended_until(uow.settings, marketplace, self.now()):
                         continue  # circuit breaker: skip until the suspension ends (manual requests stay pending)
                 try:
                     summaries.append(self.run_query(query_id))
                 except Exception:
                     # already recorded on the run as `internal` and logged by run_query
                     summaries.append(RunSummary(run_id=None, status="failed", marketplace_query_id=query_id, error_kind="internal"))
-                with self.session_factory() as session, session.begin():
-                    until = record_outcome(session, marketplace, self.now())
+                with self.unit_of_work() as uow:
+                    until = record_outcome(uow, marketplace, self.now())
+                    uow.commit()
                 if until:
                     logger.warning("marketplace suspended", extra={"event": "marketplace_suspended", "marketplace": marketplace, "until": until.isoformat()})
-            maintain(self.session_factory, self.now())  # after the runs refreshed Last Seen
+            maintain(self.unit_of_work, self.now())  # after the runs refreshed Last Seen
             return DueResult(locked=True, summaries=summaries, dispatched=self.dispatch())
 
-    @contextmanager
-    def worker_lock(self) -> Iterator[bool]:
-        """Session-level advisory lock on a dedicated connection, released on exit (or if the process dies)."""
-        engine = self.session_factory.kw["bind"]
-        with engine.connect() as conn:
-            locked = conn.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": WORKER_LOCK_KEY}).scalar()
-            conn.commit()
-            try:
-                yield locked
-            finally:
-                if locked:
-                    conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": WORKER_LOCK_KEY})
-                    conn.commit()
+    def worker_lock(self) -> AbstractContextManager[bool]:
+        """The worker lock port: True if this process is the one acquiring worker until the block ends."""
+        return self._worker_lock()
 
     def _record_pass(self) -> None:
-        with self.session_factory() as session, session.begin():
-            session.merge(AppSetting(key="worker_last_pass_at", value=self.now().isoformat()))
+        with self.unit_of_work() as uow:
+            uow.settings.put("worker_last_pass_at", self.now().isoformat())
+            uow.commit()
 
     def _due_queries(self) -> list[tuple[int, str]]:
         now = self.now()
-        with self.session_factory() as session:
-            rows = session.execute(
-                select(MarketplaceQuery.id, MarketplaceQuery.marketplace, MarketplaceQuery.scan_interval_minutes, MarketplaceQuery.last_started_at,
-                       MarketplaceQuery.manual_run_requested_at, MarketplaceQuery.status, SearchProfile.status)
-                .join(SearchProfile)
-                .where(or_(MarketplaceQuery.manual_run_requested_at.is_not(None), MarketplaceQuery.status == "active"))
-                .where(SearchProfile.status != "archived")
-                .order_by(MarketplaceQuery.manual_run_requested_at.asc().nulls_last(), MarketplaceQuery.last_started_at.asc().nulls_first())
-            ).all()
+        with self.unit_of_work() as uow:
+            rows = uow.profiles.schedule_candidates()
         due = []
         for query_id, marketplace, interval, last_started, manual, query_status, profile_status in rows:
             scheduled = (
@@ -242,19 +221,14 @@ class Pipeline:
 
     def _close_abandoned_runs(self) -> None:
         """Holding the worker lock, any run still `running` belonged to a worker that died mid-run."""
-        with self.session_factory() as session, session.begin():
-            result = session.execute(
-                update(AcquisitionRun)
-                .where(AcquisitionRun.status == "running")
-                .values(status="failed", error_kind="internal", error_message="abandoned: the worker stopped during the run", finished_at=self.now())
-            )
-            rowcount = getattr(result, "rowcount", 0)
-            closed = rowcount if isinstance(rowcount, int) else 0
+        with self.unit_of_work() as uow:
+            closed = uow.runs.close_abandoned(self.now())
+            uow.commit()
         if closed:
             logger.warning("abandoned runs closed", extra={"event": "runs_abandoned", "count": closed})
 
-    def _save_progress(self, session: Session, run_id: int, totals: dict[str, int]) -> None:
-        run = session.get(AcquisitionRun, run_id)
+    def _save_progress(self, runs: RunRepository, run_id: int, totals: dict[str, int]) -> None:
+        run = runs.get(run_id)
         if run is None:
             raise LookupError(f"Acquisition Run {run_id} not found")
         run.pages = totals["pages"]
@@ -270,9 +244,9 @@ class Pipeline:
             status = "succeeded"
         else:
             status = "partial" if totals["pages"] else "failed"
-        with self.session_factory() as session, session.begin():
-            self._save_progress(session, run_id, totals)
-            run = session.get(AcquisitionRun, run_id)
+        with self.unit_of_work() as uow:
+            self._save_progress(uow.runs, run_id, totals)
+            run = uow.runs.get(run_id)
             if run is None:
                 raise LookupError(f"Acquisition Run {run_id} not found")
             finished_at = self.now()
@@ -282,8 +256,9 @@ class Pipeline:
             run.error_message = error_message
             if complete_baseline and status == "succeeded":
                 # the first successful run is the Baseline: from now on new Opportunities notify
-                query = session.get(MarketplaceQuery, run.marketplace_query_id)
+                query = uow.profiles.get_query(run.marketplace_query_id)
                 if query is None:
                     raise LookupError(f"Marketplace Query {run.marketplace_query_id} not found")
                 query.baseline_completed_at = finished_at
+            uow.commit()
         return status
