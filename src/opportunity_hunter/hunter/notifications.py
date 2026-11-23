@@ -132,7 +132,10 @@ def price_drop_note(session: Session, notification: Notification) -> str | None:
     at = max((i for i, o in enumerate(observations) if o.price_amount == amount), default=None)
     previous = next((o for o in reversed(observations[:at]) if o.price_amount is not None), None) if at else None
     new = _money(amount, listing.currency)
-    return f"Prezzo sceso da {_money(previous.price_amount, None)} a {new}" if previous else f"Prezzo sceso a {new}"
+    previous_amount = previous.price_amount if previous is not None else None
+    if previous_amount is not None:
+        return f"Prezzo sceso da {_money(previous_amount, None)} a {new}"
+    return f"Prezzo sceso a {new}"
 
 
 def _money(amount: Decimal, currency: str | None) -> str:
@@ -142,12 +145,16 @@ def _money(amount: Decimal, currency: str | None) -> str:
 
 def to_message(opportunity: Opportunity, note: str | None = None) -> OutgoingMessage:
     listing: Listing = opportunity.match.listing
+    score = opportunity.match.score
+    url = listing.url
+    if score is None or url is None:
+        raise ValueError("an Opportunity must reference a scored match and a listing URL")
     return OutgoingMessage(
         title=listing.title or listing.external_id,
         price=format_price(listing),
         location=format_location(listing.location),
-        score=opportunity.match.score,
-        url=listing.url,
+        score=score,
+        url=url,
         image_url=listing.images[0] if listing.images else None,
         search_profile=opportunity.match.search_profile.name,
         note=note,
