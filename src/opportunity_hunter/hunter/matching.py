@@ -59,7 +59,11 @@ def known_cost(listing: Listing, profile: SearchProfile) -> Decimal | None:
     it is simply not included, so the real total can only be higher). None if the price is not comparable."""
     if listing.price_status == "free":
         price = Decimal(0)
-    elif listing.price_status == "priced" and listing.currency == profile.currency:
+    elif (
+        listing.price_status == "priced"
+        and listing.currency == profile.currency
+        and listing.price_amount is not None
+    ):
         price = listing.price_amount
     else:
         return None
