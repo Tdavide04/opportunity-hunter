@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: oh
+          POSTGRES_PASSWORD: oh
+          POSTGRES_DB: oh_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oh -d oh_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      OH_TEST_DATABASE_URL: postgresql+psycopg://oh:oh@localhost:5432/oh_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest
+      - run: uv build
