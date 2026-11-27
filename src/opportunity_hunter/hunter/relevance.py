@@ -18,7 +18,7 @@ MAX_WORD_WEIGHT = 2.0  # log-odds; e^2 ≈ 7 times more likely
 SMOOTHING = 2.0  # m of the m-estimate, in titles
 EXPLAINED_WORDS = 3
 # articles and prepositions of the Marketplaces' languages: they weigh (they tell the title's language, and the
-# language often tells the region) but they are not shown as the reason of a Relevance
+# language often tells the region) but they are not shown as the reason of a Relevance, and neither are numbers
 UNEXPLAINED = frozenset(
     "il lo la i gli le un una uno di da in con su per tra fra del della dei delle al alla e o "
     "the a an of for to and with in on or "
@@ -76,7 +76,8 @@ class RelevanceModel:
     def judge(self, title: str | None, keywords: Iterable[str]) -> Judgement:
         present = sorted(((w, self.weights[w]) for w in words(title, keywords) if w in self.weights), key=lambda item: -abs(item[1]))
         logit = sum(weight for _, weight in present)
-        explained = [(w, round(x, 2)) for w, x in present if w not in UNEXPLAINED][:EXPLAINED_WORDS]
+        # numbers weigh too (a sequel, a lot of 2) but read as noise next to a title
+        explained = [(w, round(x, 2)) for w, x in present if w not in UNEXPLAINED and not w.isdigit()][:EXPLAINED_WORDS]
         return Judgement(round(100 / (1 + math.exp(-logit))), explained, learning=False)
 
 

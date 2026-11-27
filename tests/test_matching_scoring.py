@@ -226,8 +226,8 @@ def test_profile_keywords_are_not_evidence():
     assert relevance.words("Nintendo DS Lite, 2 giochi!", CONSOLES) == {"lite", "2", "giochi"}
 
 
-def test_articles_and_prepositions_weigh_but_are_not_shown_as_reasons():
-    model = relevance.RelevanceModel({"per": -1.5, "custodia": -1.0})
-    judged = model.judge("Custodia per Nintendo DS", CONSOLES)
-    assert judged.value == round(100 / (1 + math.exp(2.5)))
+def test_articles_prepositions_and_numbers_weigh_but_are_not_shown_as_reasons():
+    model = relevance.RelevanceModel({"per": -1.5, "custodia": -1.0, "2": -0.5})
+    judged = model.judge("Custodia per Nintendo DS 2", CONSOLES)
+    assert judged.value == round(100 / (1 + math.exp(3.0)))
     assert judged.words == [("custodia", -1.0)]
