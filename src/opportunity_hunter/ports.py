@@ -28,6 +28,10 @@ class SearchProfileRepository(Protocol):
 
     def get_query(self, marketplace_query_id: int) -> MarketplaceQuery | None: ...
 
+    def all_profiles(self) -> list[SearchProfile]:
+        """Every Search Profile, whatever its status."""
+        ...
+
     def active_profiles_for(self, marketplace: str) -> list[SearchProfile]:
         """Active Search Profiles with at least one Marketplace Query on this Marketplace."""
         ...
@@ -88,6 +92,18 @@ class MatchRepository(Protocol):
     def for_pairs(self, listing_ids: Sequence[int], profile_ids: Sequence[int]) -> list[Match]: ...
 
     def add(self, match: Match) -> None: ...
+
+    def matched_for_profile(self, profile_id: int) -> list[Match]:
+        """Every matched Match of the profile, with its Listing."""
+        ...
+
+    def decisions(self, profile_id: int) -> list[tuple[str | None, str, str | None]]:
+        """(Listing title, Opportunity status, dismiss reason) for the profile's Opportunities the user decided on."""
+        ...
+
+    def relevant_costs(self, profile_id: int, seen_since: datetime, min_relevance: int) -> list[Decimal]:
+        """Known total costs of the profile's matched Listings seen since then, Relevance unknown or at least min_relevance."""
+        ...
 
 
 class OpportunityRepository(Protocol):

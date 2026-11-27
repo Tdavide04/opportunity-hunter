@@ -1,5 +1,6 @@
 """The standalone CLI answers with a message and an exit code, never a traceback."""
 
+import json
 import os
 
 import pytest
@@ -53,3 +54,20 @@ def test_preview_reports_an_unreachable_marketplace(
     assert cli.main(["preview", "subito", '{"search_text": "zelda"}']) == 1
     assert "connection error" in capsys.readouterr().err
 
+
+
+@pytest.mark.skipif(not os.getenv("OH_TEST_DATABASE_URL"), reason="PostgreSQL integration URL not set")
+def test_rescore_reports_the_matches_scored_per_profile(
+    engine: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from sqlalchemy.orm import Session
+
+    from opportunity_hunter.db.models import SearchProfile
+
+    with Session(engine) as session:  # type: ignore[arg-type]
+        session.add(SearchProfile(name="DS", keywords=["Nintendo DS"], currency="EUR", score_threshold=0))
+        session.commit()
+    monkeypatch.setenv("OH_DATABASE_URL", os.environ["OH_TEST_DATABASE_URL"])
+    monkeypatch.setattr(engine_module, "default_sources", dict)  # the real ones would import the scanner extras
+    assert cli.main(["rescore"]) == 0
+    assert list(json.loads(capsys.readouterr().out).values()) == [0]

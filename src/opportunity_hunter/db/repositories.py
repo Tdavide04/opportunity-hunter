@@ -37,6 +37,9 @@ class SqlAlchemySearchProfileRepository:
     def get_query(self, marketplace_query_id: int) -> MarketplaceQuery | None:
         return self.session.get(MarketplaceQuery, marketplace_query_id)
 
+    def all_profiles(self) -> list[SearchProfile]:
+        return list(self.session.scalars(select(SearchProfile).order_by(SearchProfile.id)))
+
     def active_profiles_for(self, marketplace: str) -> list[SearchProfile]:
         on_marketplace = select(MarketplaceQuery.search_profile_id).where(MarketplaceQuery.marketplace == marketplace)
         return list(self.session.scalars(select(SearchProfile).where(SearchProfile.status == "active", SearchProfile.id.in_(on_marketplace))))
@@ -160,6 +163,30 @@ class SqlAlchemyMatchRepository:
 
     def add(self, match: Match) -> None:
         self.session.add(match)
+
+    def matched_for_profile(self, profile_id: int) -> list[Match]:
+        return list(self.session.scalars(
+            select(Match).where(Match.search_profile_id == profile_id, Match.matched).options(joinedload(Match.listing)).order_by(Match.id)
+        ))
+
+    def decisions(self, profile_id: int) -> list[tuple[str | None, str, str | None]]:
+        rows = self.session.execute(
+            select(Listing.title, Opportunity.status, Opportunity.dismiss_reason)
+            .join(Match, Match.id == Opportunity.match_id).join(Listing, Listing.id == Match.listing_id)
+            .where(Match.search_profile_id == profile_id, Opportunity.status != "new")
+            .order_by(Opportunity.id)
+        )
+        return [(title, status, reason) for title, status, reason in rows]
+
+    def relevant_costs(self, profile_id: int, seen_since: datetime, min_relevance: int) -> list[Decimal]:
+        cost = Match.reasons["total_cost"].astext
+        return [Decimal(value) for value in self.session.scalars(
+            select(cost).join(Listing, Listing.id == Match.listing_id)
+            .where(
+                Match.search_profile_id == profile_id, Match.matched, cost.is_not(None), Listing.last_seen_at >= seen_since,
+                or_(Match.relevance.is_(None), Match.relevance >= min_relevance),
+            )
+        )]
 
 
 class SqlAlchemyOpportunityRepository:

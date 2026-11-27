@@ -29,13 +29,22 @@ Arrows point from the module to whoever uses it, never back.
 - Subito Scanner 0.2.0 and Vinted Scanner 0.3.0 have built-in optional adapters (`opportunity_hunter.sources`), installed with the `subito` and `vinted` extras.
 - Total cost: when a source's list pages have no shipping (Vinted), an adapter that implements the optional `PricingSource` port prices the changed Listings that match a Search Profile from their item page before scoring, at most `Pipeline(pricing_per_page=10)` item pages per list page. A Listing beyond the limit or whose page fails stays `unknown` until it changes.
 
+## Score
+
+Score v4 (`opportunity_hunter.hunter.scoring`) gives every matched Listing two explained numbers, 0-100:
+
+- **Relevance**: is it the object the user wants? A naive Bayes over title words, learned per Search Profile from the decisions on its Opportunities (`hunter/relevance.py`). Kept (seen, pursued, acquired) and dismissed for price or condition teach "right object"; dismissed as another item, an accessory or the wrong region teach "wrong object"; a dismissal without a reason counts half. Below 3 decisions of each kind it stays at 50.
+- **Deal**: the discount of the total cost on a reference price, 50 at the reference and 100 at half of it. The reference is the median total cost of the profile's relevant Matches seen in the last 60 days, shrunk toward the profile's target price while there are few. A price below 40 % of the reference is flagged as suspicious and capped.
+
+The Score is their geometric mean: it orders Opportunities and meets the Score Threshold. After a decision, `rescore_profile` scores the profile's Matches again; `opportunity-hunter rescore` does it for every profile.
+
 ## Database migrations
 
 Opportunity Hunter owns the migrations of its nine tables (`opportunity_hunter.migrations`, ADR-0013 phase 5). Its version is kept in `oh_alembic_version`, so a host's own `alembic_version` is never read or written. There is no downgrade.
 
 - New database: `opportunity-hunter init-db --yes-empty-db` (refuses a database with any table), or `upgrade-db`. The `oh0001` baseline creates the tables exactly as Personal Collection Hub had them at its revision `0010`.
 - Existing database that already has the tables (PCH's): `check-db` prints how they differ from the baseline; `adopt-db --yes-existing-db` builds the baseline in a throw-away schema inside a savepoint, compares columns, constraints and indexes, and stamps `oh0001` only on an exact match, with row counts checked before and after, in one transaction. No table, column or row is touched.
-- After that, `upgrade-db` applies later revisions.
+- After that, `upgrade-db` applies later revisions. `oh0002` adds Relevance and Deal to `match` and the dismiss reason to `opportunity`; then run `rescore` once so existing Matches get Score v4.
 
 Adopting a production database is a separately authorized step: back it up and test the restore first, and run `check-db` and `adopt-db` on the restored copy before the real one.
 
