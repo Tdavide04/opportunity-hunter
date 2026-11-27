@@ -10,6 +10,7 @@ from opportunity_hunter.adapter import MarketplaceAdapter
 from opportunity_hunter.channels.base import NotificationChannel
 from opportunity_hunter.config import OpportunityHunterConfig
 from opportunity_hunter.db.store import SqlAlchemyStore
+from opportunity_hunter.hunter.evaluation import rescore_profile
 from opportunity_hunter.hunter.pipeline import DueResult, Pipeline, RunSummary, utcnow
 from opportunity_hunter.sources.subito import default_sources
 
@@ -65,6 +66,14 @@ class OpportunityHunter:
 
     def run_query(self, marketplace_query_id: int, *, dry_run: bool = False) -> RunSummary:
         return self.pipeline.run_query(marketplace_query_id, dry_run=dry_run)
+
+    def rescore(self) -> dict[int, int]:
+        """Score again the matched Matches of every Search Profile with the current rules: profile id -> Matches scored."""
+        now = self.pipeline.now()
+        with self.store.unit_of_work() as uow:
+            scored = {profile.id: rescore_profile(uow.matches, uow.price_history, profile, now) for profile in uow.profiles.all_profiles()}
+            uow.commit()
+        return scored
 
     def dispatch(self) -> dict[str, int]:
         return self.pipeline.dispatch()

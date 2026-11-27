@@ -38,7 +38,7 @@ def test_significant_drop_rescores_and_notifies_once_per_amount(pipeline, add_qu
     pipeline.dispatch()
     with session_factory() as session:
         before = session.scalars(select(Match)).one()
-        assert before.score_breakdown["price_drop"] == 0
+        assert before.score_breakdown["deal"]["price_drop"] == 0
 
     fixtures("re", [{"items": [item("a1", price="15.00")]}])  # -25 %
     pipeline.run_query(query_id)
@@ -49,7 +49,7 @@ def test_significant_drop_rescores_and_notifies_once_per_amount(pipeline, add_qu
     assert len(channel.sent) == 2 and channel.sent[1].note == "Prezzo sceso da 20,00 a 15,00 EUR"
     with session_factory() as session:
         after = session.scalars(select(Match)).one()
-        assert after.score_breakdown["price_drop"] > 0 and after.score > before.score
+        assert after.score_breakdown["deal"]["price_drop"] > 0 and after.score > before.score
 
 
 def test_small_drop_rescores_without_notifying(pipeline, add_query, fixtures, session_factory):
@@ -105,7 +105,7 @@ def test_price_increase_is_not_a_drop(pipeline, add_query, fixtures, session_fac
     pipeline.run_query(query_id)
     assert reasons(session_factory) == ["new_opportunity"]
     with session_factory() as session:
-        assert session.scalars(select(Match)).one().score_breakdown["price_drop"] == 0
+        assert session.scalars(select(Match)).one().score_breakdown["deal"]["price_drop"] == 0
 
 
 def test_drop_in_a_dry_run_is_suppressed(pipeline, add_query, fixtures, session_factory):

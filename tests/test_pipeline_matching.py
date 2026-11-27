@@ -3,9 +3,12 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload
 
 from opportunity_hunter.adapter import ItemPricing
 from opportunity_hunter.db.models import MarketplaceQuery, Match, Opportunity, SearchProfile
+from opportunity_hunter.db.repositories import SqlAlchemyMatchRepository, SqlAlchemyPriceHistoryRepository
+from opportunity_hunter.hunter.evaluation import rescore_profile
 from opportunity_hunter.hunter.pipeline import Pipeline
 from opportunity_hunter.hunter.scoring import SCORING_VERSION
 from tests.support import FixtureAdapter, sqlalchemy_ports
@@ -89,7 +92,7 @@ def test_opportunity_needs_the_score_threshold(pipeline, fixtures, add_profile, 
 
     (m,) = matches(session_factory)
     assert m.matched is True and m.score < 90
-    assert set(m.score_breakdown) == {"price", "freshness", "title", "price_drop"}
+    assert set(m.score_breakdown) == {"relevance", "deal"} and m.deal == 10 and m.relevance == 50
     assert opportunities(session_factory) == []
 
 
@@ -176,3 +179,29 @@ def test_shipping_is_priced_before_scoring_only_for_wanted_listings(session_fact
     first, _, third = sorted(by_listing.values(), key=lambda m: m.listing_id)
     assert (first.reasons["shipping"], first.reasons["total_cost"]) == ("known", "16.34")
     assert (third.reasons["shipping"], third.reasons["total_cost"]) == ("unknown", "11.00")
+
+
+def test_decisions_teach_relevance_after_a_rescore(pipeline, fixtures, add_profile, session_factory, clock):
+    consoles = [item(f"c{n}", title=f"Nintendo DS Lite console {colour}") for n, colour in enumerate(["nero", "blu", "rosa", "bianco"])]
+    games = [item(f"g{n}", title=f"Nintendo DS gioco {name}") for n, name in enumerate(["Mario", "Zelda", "Layton", "Kirby"])]
+    profile_id, query_id = add_profile("DS", ["Nintendo DS"], fixture=fixtures("ds", [{"items": consoles + games}]), price_target=Decimal("15.00"))
+    pipeline.run_query(query_id)
+    assert {m.relevance for m in matches(session_factory)} == {50}  # no decisions yet: neutral
+
+    with session_factory() as session:
+        for opportunity in session.scalars(select(Opportunity).join(Match).order_by(Opportunity.id)):
+            listing_title = opportunity.match.listing.title
+            if listing_title.endswith(("nero", "blu", "rosa")):
+                opportunity.status = "seen"
+            elif not listing_title.endswith("Kirby"):
+                opportunity.status, opportunity.dismiss_reason = "dismissed", "other_item"
+        profile = session.get(SearchProfile, profile_id)
+        uow_matches, history = SqlAlchemyMatchRepository(session), SqlAlchemyPriceHistoryRepository(session)
+        assert rescore_profile(uow_matches, history, profile, clock()) == 8
+        session.commit()
+
+    with session_factory() as session:
+        scored = {m.listing.title: m for m in session.scalars(select(Match).options(joinedload(Match.listing)))}
+    assert scored["Nintendo DS gioco Kirby"].relevance < 50 < scored["Nintendo DS Lite console bianco"].relevance
+    assert scored["Nintendo DS gioco Kirby"].score_breakdown["relevance"]["words"][0][0] == "gioco"
+    assert {o.status for o in opportunities(session_factory)} == {"seen", "dismissed", "new"}  # decisions are kept

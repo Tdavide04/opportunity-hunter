@@ -33,6 +33,12 @@ def empty_engine() -> Iterator[Engine]:
         engine.dispose()
 
 
+def _baseline_tables(engine: Engine) -> None:
+    """The Hunter tables as a host database had them before adoption: the baseline DDL, never stamped."""
+    with engine.begin() as connection:
+        connection.exec_driver_sql(migrations._BASELINE_SQL.read_text())
+
+
 def _seed(engine: Engine) -> None:
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO app_setting (key, value) VALUES ('paused', 'false')"))
@@ -40,11 +46,21 @@ def _seed(engine: Engine) -> None:
 
 
 def test_new_database_gets_the_baseline(empty_engine: Engine) -> None:
-    migrations.upgrade(empty_engine)
+    migrations.upgrade(empty_engine, migrations.BASELINE)
     with empty_engine.connect() as connection:
         assert migrations.current_revision(connection) == migrations.BASELINE
         assert migrations.OWNED_TABLES <= set(inspect(connection).get_table_names())
         assert migrations.schema_differences(connection) == []
+
+
+def test_oh0002_adds_relevance_deal_and_dismiss_reason(empty_engine: Engine) -> None:
+    _baseline_tables(empty_engine)
+    migrations.adopt_existing(empty_engine)
+    migrations.upgrade(empty_engine)
+    with empty_engine.connect() as connection:
+        assert migrations.current_revision(connection) == "oh0002"
+        assert {"relevance", "deal"} <= {c["name"] for c in inspect(connection).get_columns("match")}
+        assert "dismiss_reason" in {c["name"] for c in inspect(connection).get_columns("opportunity")}
 
 
 def test_models_match_the_migrations(empty_engine: Engine) -> None:
@@ -59,7 +75,7 @@ def test_models_match_the_migrations(empty_engine: Engine) -> None:
 
 
 def test_existing_tables_are_adopted_without_touching_rows(empty_engine: Engine) -> None:
-    Base.metadata.create_all(empty_engine)
+    _baseline_tables(empty_engine)
     _seed(empty_engine)
 
     result = migrations.adopt_existing(empty_engine)
@@ -78,7 +94,7 @@ def test_existing_tables_are_adopted_without_touching_rows(empty_engine: Engine)
 
 
 def test_the_hosts_alembic_version_is_left_alone(empty_engine: Engine) -> None:
-    Base.metadata.create_all(empty_engine)
+    _baseline_tables(empty_engine)
     with empty_engine.begin() as connection:
         connection.exec_driver_sql("CREATE TABLE alembic_version (version_num varchar(32) PRIMARY KEY)")
         connection.exec_driver_sql("INSERT INTO alembic_version VALUES ('0010')")
@@ -90,7 +106,7 @@ def test_the_hosts_alembic_version_is_left_alone(empty_engine: Engine) -> None:
 
 
 def test_adoption_refuses_a_schema_that_differs(empty_engine: Engine) -> None:
-    Base.metadata.create_all(empty_engine)
+    _baseline_tables(empty_engine)
     with empty_engine.begin() as connection:
         connection.exec_driver_sql("ALTER TABLE listing ADD COLUMN surprise text")
 
@@ -102,7 +118,7 @@ def test_adoption_refuses_a_schema_that_differs(empty_engine: Engine) -> None:
 
 
 def test_adoption_refuses_missing_tables(empty_engine: Engine) -> None:
-    Base.metadata.create_all(empty_engine)
+    _baseline_tables(empty_engine)
     with empty_engine.begin() as connection:
         connection.exec_driver_sql("DROP TABLE listing_price_history")
 
@@ -111,7 +127,7 @@ def test_adoption_refuses_missing_tables(empty_engine: Engine) -> None:
 
 
 def test_upgrade_refuses_unadopted_tables(empty_engine: Engine) -> None:
-    Base.metadata.create_all(empty_engine)
+    _baseline_tables(empty_engine)
 
     with pytest.raises(migrations.MigrationRefused, match="adopt"):
         migrations.upgrade(empty_engine)

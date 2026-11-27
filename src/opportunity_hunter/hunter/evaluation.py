@@ -1,18 +1,70 @@
 """Evaluates changed Listings against every active Search Profile of their Marketplace (ADR-0004)."""
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from opportunity_hunter.db.models import Listing, Match, Opportunity, SearchProfile
-from opportunity_hunter.hunter.matching import match
-from opportunity_hunter.hunter.scoring import SCORING_VERSION, drop_percent, score
-from opportunity_hunter.ports import PriceHistoryRepository, SearchProfileRepository, UnitOfWork
+from opportunity_hunter.hunter import relevance
+from opportunity_hunter.hunter.matching import MatchResult, match
+from opportunity_hunter.hunter.scoring import SCORING_VERSION, drop_percent, reference_price, score
+from opportunity_hunter.ports import MatchRepository, PriceHistoryRepository, SearchProfileRepository, UnitOfWork
+
+MARKET_WINDOW = timedelta(days=60)  # Listings seen within this window make the reference price
 
 
 @dataclass
 class Evaluation:
     created: list[Opportunity] = field(default_factory=list)  # new Opportunities: notify as new
     price_drops: list[tuple[Opportunity, str]] = field(default_factory=list)  # (existing Opportunity, price_drop:<amount>)
+
+
+@dataclass(frozen=True)
+class ProfileKnowledge:
+    """What scoring needs to know about a profile beyond the Listing: its learned Relevance and its market."""
+
+    model: relevance.RelevanceModel | None
+    reference: Decimal | None
+    market_size: int
+
+
+def knowledge_of(matches: MatchRepository, profile: SearchProfile, now: datetime) -> ProfileKnowledge:
+    examples = []
+    for title, status, reason in matches.decisions(profile.id):
+        taught = relevance.label(status, reason)
+        if taught is not None:
+            examples.append(relevance.Example(title or "", *taught))
+    market = matches.relevant_costs(profile.id, now - MARKET_WINDOW, relevance.NEUTRAL)
+    return ProfileKnowledge(relevance.train(examples, profile.keywords), reference_price(market, profile), len(market))
+
+
+def apply_score(row: Match, listing: Listing, profile: SearchProfile, result: MatchResult, knowledge: ProfileKnowledge,
+                previous_price: Decimal | None, now: datetime) -> None:
+    row.matched = result.matched
+    row.reasons = result.reasons
+    if result.matched:
+        judgement = relevance.judge(knowledge.model, listing.title, profile.keywords)
+        scored = score(listing, result, judgement, knowledge.reference, knowledge.market_size, previous_price)
+        row.score, row.relevance, row.deal, row.score_breakdown = scored.score, scored.relevance, scored.deal, scored.breakdown
+    else:
+        row.score = row.relevance = row.deal = row.score_breakdown = None
+    row.scoring_version = SCORING_VERSION
+    row.evaluated_at = now
+
+
+def rescore_profile(matches: MatchRepository, history: PriceHistoryRepository, profile: SearchProfile, now: datetime) -> int:
+    """Score again every matched Match of the profile, e.g. after a decision taught Relevance something new.
+
+    Matching is not repeated (neither the Listing nor the profile changed) and no Opportunity is opened or
+    closed: only Score, Relevance, Deal and their breakdown change. Returns how many Matches were scored.
+    Caller owns the transaction.
+    """
+    rows = matches.matched_for_profile(profile.id)
+    knowledge = knowledge_of(matches, profile, now)
+    dropped_from = previous_prices(history, [row.listing_id for row in rows])
+    for row in rows:
+        result = MatchResult(matched=True, reasons=row.reasons)
+        apply_score(row, row.listing, profile, result, knowledge, dropped_from.get(row.listing_id), now)
+    return len(rows)
 
 
 def profiles_for(profiles: SearchProfileRepository, marketplace: str) -> list[SearchProfile]:
@@ -57,6 +109,7 @@ def evaluate(
     if not listings or not profiles:
         return outcome
     known = {(m.search_profile_id, m.listing_id): m for m in uow.matches.for_pairs([lst.id for lst in listings], [p.id for p in profiles])}
+    knowledge: dict[int, ProfileKnowledge] = {}
     changed_ids = {lst.id for lst in changed}
     uow.flush()  # this page's price history rows must be visible to previous_prices
     dropped_from = previous_prices(uow.price_history, [lst.id for lst in listings])
@@ -66,17 +119,14 @@ def evaluate(
             if row is not None and listing.id not in changed_ids and profile.updated_at <= row.evaluated_at:
                 continue
             result = match(listing, profile)
-            value, breakdown = score(listing, profile, result, now, dropped_from.get(listing.id)) if result.matched else (None, None)
+            if profile.id not in knowledge:
+                knowledge[profile.id] = knowledge_of(uow.matches, profile, now)
             previous_price = price_drops.get(listing.id)
             if row is None:
                 row = Match(search_profile_id=profile.id, listing_id=listing.id)
                 uow.matches.add(row)
-            row.matched = result.matched
-            row.reasons = result.reasons
-            row.score = value
-            row.score_breakdown = breakdown
-            row.scoring_version = SCORING_VERSION
-            row.evaluated_at = now
+            apply_score(row, listing, profile, result, knowledge[profile.id], dropped_from.get(listing.id), now)
+            value = row.score
             if value is not None and value >= profile.score_threshold and row.opportunity is None:
                 outcome.created.append(uow.opportunities.create(row, now))
             elif (

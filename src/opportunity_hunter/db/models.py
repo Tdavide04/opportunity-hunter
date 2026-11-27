@@ -36,6 +36,9 @@ ERROR_KINDS = ("transient", "permanent", "internal")
 LISTING_ORIGINS = ("acquired", "legacy_seen")
 AVAILABILITIES = ("active", "not_seen")
 OPPORTUNITY_STATUSES = ("new", "seen", "dismissed", "pursued", "acquired")
+# why the user dismissed an Opportunity: the wrong object (other_item, accessory, region) or the right one at the
+# wrong price or condition (too_expensive, condition); Relevance learns from it
+DISMISS_REASONS = ("other_item", "accessory", "region", "too_expensive", "condition")
 NOTIFICATION_STATUSES = ("pending", "sent", "failed", "suppressed")
 SUPPRESSION_REASONS = ("baseline", "paused", "dry_run", "legacy_seen", "shadow_mode")
 
@@ -195,6 +198,8 @@ class Match(Base):
         UniqueConstraint("search_profile_id", "listing_id", name="uq_match_profile_listing"),
         CheckConstraint("score BETWEEN 0 AND 100", name="score_range"),
         CheckConstraint("matched OR score IS NULL", name="score_only_when_matched"),
+        CheckConstraint("relevance BETWEEN 0 AND 100", name="relevance_range"),
+        CheckConstraint("deal BETWEEN 0 AND 100", name="deal_range"),
         Index("ix_match_score", "score"),
         Index("ix_match_listing_id", "listing_id"),
     )
@@ -205,6 +210,8 @@ class Match(Base):
     matched: Mapped[bool]
     reasons: Mapped[dict[str, Any]] = mapped_column(JSONB)
     score: Mapped[int | None] = mapped_column(SmallInteger)
+    relevance: Mapped[int | None] = mapped_column(SmallInteger)  # Score v4: is it the object the user wants?
+    deal: Mapped[int | None] = mapped_column(SmallInteger)  # Score v4: how cheap against the reference price
     score_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     scoring_version: Mapped[int] = mapped_column(SmallInteger)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -220,6 +227,8 @@ class Opportunity(Base):
     __tablename__ = "opportunity"
     __table_args__ = (
         CheckConstraint(_in("status", OPPORTUNITY_STATUSES), name="status"),
+        CheckConstraint(_in("dismiss_reason", DISMISS_REASONS), name="dismiss_reason"),
+        CheckConstraint("dismiss_reason IS NULL OR status = 'dismissed'", name="dismiss_reason_only_when_dismissed"),
         Index("ix_opportunity_status_created_at", "status", text("created_at DESC")),
     )
 
@@ -228,6 +237,7 @@ class Opportunity(Base):
     status: Mapped[str] = mapped_column(Text, server_default="new")
     status_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    dismiss_reason: Mapped[str | None] = mapped_column(Text)
 
     match: Mapped[Match] = relationship(back_populates="opportunity")
 

@@ -28,6 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("query_id", type=int)
     run.add_argument("--dry-run", action="store_true")
     sub.add_parser("dispatch", help="deliver pending notifications")
+    sub.add_parser("rescore", help="score every matched Match again with the current scoring rules")
     preview = sub.add_parser("preview", help="fetch one page without persistence")
     preview.add_argument("marketplace")
     preview.add_argument("params_json", help="JSON object with source query parameters")
@@ -106,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
             _json(asdict(hunter.run_query(args.query_id, dry_run=args.dry_run)))
         elif args.command == "dispatch":
             _json(hunter.dispatch())
+        elif args.command == "rescore":
+            _json(hunter.rescore())
         elif args.command == "preview":
             if args.max_items < 1:
                 print("--max-items must be at least 1", file=sys.stderr)

@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -8,7 +7,8 @@ from opportunity_hunter.adapter import InvalidParams, Page, PermanentMarketplace
 from opportunity_hunter.db.models import Base
 from opportunity_hunter.domain import ListingCandidate
 from opportunity_hunter.hunter.matching import match
-from opportunity_hunter.hunter.scoring import score
+from opportunity_hunter.hunter.relevance import judge
+from opportunity_hunter.hunter.scoring import reference_price, score
 
 
 def candidate(**changes):
@@ -77,6 +77,6 @@ def test_matching_and_scoring_are_pure_and_deterministic():
     )
     result = match(listing, profile)
     assert result.matched
-    value, breakdown = score(listing, profile, result, datetime.now(UTC))
-    assert 0 <= value <= 100
-    assert set(breakdown) == {"price", "freshness", "title", "price_drop"}
+    scored = score(listing, result, judge(None, listing.title, profile.keywords), reference_price([], profile), 0)
+    assert 0 <= scored.score <= 100
+    assert set(scored.breakdown) == {"relevance", "deal"}
