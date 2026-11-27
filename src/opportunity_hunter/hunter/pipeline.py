@@ -6,13 +6,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from opportunity_hunter.adapter import MarketplaceAdapter, PermanentMarketplaceError, TransientMarketplaceError
+from opportunity_hunter.adapter import MarketplaceAdapter, PermanentMarketplaceError, PricingSource, TransientMarketplaceError
 from opportunity_hunter.channels.base import NotificationChannel
 from opportunity_hunter.hunter.availability import maintain
 from opportunity_hunter.hunter.circuit import record_outcome, suspended_until
 from opportunity_hunter.hunter.evaluation import evaluate, profiles_for
 from opportunity_hunter.hunter.listings import upsert_page
 from opportunity_hunter.hunter.notifications import dispatch, enqueue, read_settings
+from opportunity_hunter.hunter.pricing import complete_pricing
 from opportunity_hunter.ports import WORKER_LOCK_KEY, RunRepository, UnitOfWorkFactory, WorkerLock
 
 __all__ = ["WORKER_LOCK_KEY", "DueResult", "Pipeline", "RunSummary", "utcnow"]
@@ -58,6 +59,7 @@ class Pipeline:
         now: Callable[[], datetime] = utcnow,
         channels: list[NotificationChannel] | None = None,
         max_attempts: int = 5,
+        pricing_per_page: int = 10,
     ):
         self.unit_of_work = unit_of_work
         self._worker_lock = worker_lock
@@ -65,6 +67,7 @@ class Pipeline:
         self.now = now
         self.channels = channels or []
         self.max_attempts = max_attempts
+        self.pricing_per_page = pricing_per_page  # item pages per list page, for adapters that price on demand
 
     def dispatch(self) -> dict[str, int]:
         """Deliver pending Notifications (after the runs committed them) and retry failed ones."""
@@ -130,9 +133,10 @@ class Pipeline:
                     now = self.now()
                     counts = upsert_page(uow, marketplace, page.candidates, run_id, now)
                     # profiles are re-read per page so edits made during a long run apply from the next page
-                    outcome = evaluate(
-                        uow, counts.seen, counts.changed, profiles_for(uow.profiles, marketplace), now, counts.price_drops, drop_min_percent
-                    )
+                    profiles = profiles_for(uow.profiles, marketplace)
+                    if isinstance(adapter, PricingSource):
+                        complete_pricing(adapter, params, counts.changed, profiles, self.pricing_per_page)
+                    outcome = evaluate(uow, counts.seen, counts.changed, profiles, now, counts.price_drops, drop_min_percent)
                     # same transaction as the Opportunities (ADR-0003); a Legacy Seen Listing was already notified by the
                     # Legacy Scanner, so its Opportunities are recorded as suppressed
                     legacy = [o for o in outcome.created if o.match.listing_id in counts.promoted]

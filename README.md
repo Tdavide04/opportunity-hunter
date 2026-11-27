@@ -26,7 +26,8 @@ Arrows point from the module to whoever uses it, never back.
 - Embedded: PCH passes its existing SQLAlchemy Engine or session factory. OH maps the same Hunter tables; no rows are copied.
 - OH never imports PCH. PCH integration is through Engine, source and notification-channel injection.
 - The engine depends only on the persistence ports in `opportunity_hunter.ports` (repositories, Unit of Work, worker lock); `SqlAlchemyStore` provides their PostgreSQL implementation.
-- Subito Scanner 0.2.0 and Vinted Scanner 0.2.0 have built-in optional adapters (`opportunity_hunter.sources`), installed with the `subito` and `vinted` extras.
+- Subito Scanner 0.2.0 and Vinted Scanner 0.3.0 have built-in optional adapters (`opportunity_hunter.sources`), installed with the `subito` and `vinted` extras.
+- Total cost: when a source's list pages have no shipping (Vinted), an adapter that implements the optional `PricingSource` port prices the changed Listings that match a Search Profile from their item page before scoring, at most `Pipeline(pricing_per_page=10)` item pages per list page. A Listing beyond the limit or whose page fails stays `unknown` until it changes.
 
 ## Database migrations
 

@@ -4,8 +4,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from opportunity_hunter.adapter import ItemPricing
 from opportunity_hunter.db.models import MarketplaceQuery, Match, Opportunity, SearchProfile
+from opportunity_hunter.hunter.pipeline import Pipeline
 from opportunity_hunter.hunter.scoring import SCORING_VERSION
+from tests.support import FixtureAdapter, sqlalchemy_ports
 from tests.test_pipeline import clock, fixtures, item, pipeline, session_factory  # noqa: F401  (fixtures)
 
 
@@ -145,3 +148,31 @@ def test_edited_profile_is_reapplied_at_the_next_run(pipeline, fixtures, add_pro
 
     (m,) = matches(session_factory)
     assert m.matched is False and m.reasons["excluded"] == ["cover"]
+
+
+class PricingFixtureAdapter(FixtureAdapter):
+    """A fixture source whose list has no shipping, priced on demand like Vinted."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.priced: list[str] = []
+
+    def item_pricing(self, params, external_id):
+        self.priced.append(external_id)
+        return ItemPricing("known", shipping_amount=Decimal("4.99"), fees_amount=Decimal("1.35"), currency="EUR")
+
+
+def test_shipping_is_priced_before_scoring_only_for_wanted_listings(session_factory, tmp_path, clock, fixtures, add_profile):
+    source = PricingFixtureAdapter(tmp_path)
+    pipeline = Pipeline(*sqlalchemy_ports(session_factory), {"fixture": source}, now=clock, pricing_per_page=1)
+    pages = [{"items": [item("a1", price="10.00"), item("a2", title="Silent Hill"), item("a3", price="11.00")]}]
+    _, query_id = add_profile("RE", ["Resident Evil"], fixture=fixtures("re", pages), price_max=Decimal("20.00"))
+
+    pipeline.run_query(query_id)
+    pipeline.run_query(query_id)  # unchanged: no new item pages
+
+    assert source.priced == ["a1"]  # a2 matches no profile, a3 is beyond the per-page limit
+    by_listing = {m.listing_id: m for m in matches(session_factory)}
+    first, _, third = sorted(by_listing.values(), key=lambda m: m.listing_id)
+    assert (first.reasons["shipping"], first.reasons["total_cost"]) == ("known", "16.34")
+    assert (third.reasons["shipping"], third.reasons["total_cost"]) == ("unknown", "11.00")
