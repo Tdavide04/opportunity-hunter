@@ -19,7 +19,7 @@ subito = [
 ]
 # GPL-3.0-only: distributing OH together with this extra distributes GPL code (see README)
 vinted = [
-    "vinted-scanner @ git+https://github.com/Tdavide04/vinted-scanner@89c8cbb27df9f61ff4c9fb50bf577cca06a2d955",
+    "vinted-scanner @ git+https://github.com/Tdavide04/vinted-scanner@788630e54063f9cd9c10f0d4270af77ce039272d",
 ]
 all = [
     "opportunity-hunter[subito,vinted]",

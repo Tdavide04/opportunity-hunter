@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from opportunity_hunter.adapter import InvalidParams, PermanentMarketplaceError, TransientMarketplaceError
+from opportunity_hunter.adapter import InvalidParams, ItemPricing, PermanentMarketplaceError, TransientMarketplaceError
 from opportunity_hunter.domain import ListingCandidate
 from opportunity_hunter.sources.subito import SubitoSourceAdapter, UnavailableSource, default_sources
 from opportunity_hunter.sources.vinted import VintedSourceAdapter
@@ -169,6 +169,18 @@ def test_real_vinted_scanner_through_the_adapter():
     assert page.candidates[0].fees_amount == Decimal("2.30")
     with pytest.raises(InvalidParams):
         source.validate_params({})
+
+
+def test_real_vinted_item_pricing_through_the_adapter():
+    """With the `vinted` extra installed: shipping and buyer protection from the scanner's real item page fixture."""
+    testing = pytest.importorskip("vinted_scanner.testing")
+    scanner = testing.scanner_with(testing.FakeVinted([], item_pages={"9000000001": testing.item_page_response()}))
+    source = VintedSourceAdapter(scanner)
+    params = source.validate_params({"search_text": "resident evil"})
+    assert source.item_pricing(params, "9000000001") == ItemPricing("known", Decimal("4.99"), Decimal("1.35"), "EUR")
+    with pytest.raises(PermanentMarketplaceError) as exc:
+        source.item_pricing(params, "404")
+    assert exc.value.status == 404
 
 
 def test_real_subito_scanner_errors_through_the_adapter():

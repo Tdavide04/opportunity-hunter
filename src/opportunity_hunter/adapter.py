@@ -1,8 +1,9 @@
 """The port between the hub and one Marketplace: what an adapter must provide and the errors it may raise."""
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from decimal import Decimal
+from typing import Any, Protocol, runtime_checkable
 
-from opportunity_hunter.domain import ListingCandidate
+from opportunity_hunter.domain import ListingCandidate, ShippingStatus
 
 # optional canonical fields an adapter may declare it provides; the others are "not applicable" for it
 CAPABILITIES: frozenset[str] = frozenset({"description", "images", "location", "seller", "condition", "published_at"})
@@ -58,4 +59,23 @@ class MarketplaceAdapter(Protocol):
 
     def fetch_page(self, params: dict[str, Any], cursor: Any | None) -> Page:
         """Fetch one page (cursor None = first page). Raises only Transient/PermanentMarketplaceError."""
+        ...
+
+
+@dataclass(frozen=True)
+class ItemPricing:
+    """Shipping and mandatory fees of one listing, read from its item page; amounts in `currency`."""
+
+    shipping_status: ShippingStatus
+    shipping_amount: Decimal | None = None
+    fees_amount: Decimal | None = None
+    currency: str | None = None
+
+
+@runtime_checkable
+class PricingSource(Protocol):
+    """Optional port of an adapter whose list pages lack shipping (Vinted): prices one listing on demand."""
+
+    def item_pricing(self, params: dict[str, Any], external_id: str) -> ItemPricing:
+        """One item page for a listing of a query with these params. Raises only Transient/PermanentMarketplaceError."""
         ...

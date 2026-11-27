@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -529,7 +529,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "sqlalchemy", specifier = ">=2.1.9" },
     { name = "subito-scanner", marker = "extra == 'subito'", git = "https://github.com/Tdavide04/subito-scanner?rev=2cb97be49a7fd5187a6819c8349d7b26fb72d8d3" },
-    { name = "vinted-scanner", marker = "extra == 'vinted'", git = "https://github.com/Tdavide04/vinted-scanner?rev=89c8cbb27df9f61ff4c9fb50bf577cca06a2d955" },
+    { name = "vinted-scanner", marker = "extra == 'vinted'", git = "https://github.com/Tdavide04/vinted-scanner?rev=788630e54063f9cd9c10f0d4270af77ce039272d" },
 ]
 provides-extras = ["subito", "vinted", "all"]
 
@@ -788,8 +788,8 @@ wheels = [
 
 [[package]]
 name = "vinted-scanner"
-version = "0.2.0"
-source = { git = "https://github.com/Tdavide04/vinted-scanner?rev=89c8cbb27df9f61ff4c9fb50bf577cca06a2d955#89c8cbb27df9f61ff4c9fb50bf577cca06a2d955" }
+version = "0.3.0"
+source = { git = "https://github.com/Tdavide04/vinted-scanner?rev=788630e54063f9cd9c10f0d4270af77ce039272d#788630e54063f9cd9c10f0d4270af77ce039272d" }
 dependencies = [
     { name = "requests" },
 ]

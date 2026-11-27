@@ -5,7 +5,7 @@ Every repository Opportunity Hunter points to has one file here: where it lives,
 | Repository | Pinned commit | Version | Licence | Extra | Used by |
 |---|---|---|---|---|---|
 | [subito-scanner](https://github.com/Tdavide04/subito-scanner) | [`2cb97be`](https://github.com/Tdavide04/subito-scanner/commit/2cb97be49a7fd5187a6819c8349d7b26fb72d8d3) | 0.2.0 | MIT | `subito` | `opportunity_hunter.sources.subito` |
-| [vinted-scanner](https://github.com/Tdavide04/vinted-scanner) | [`89c8cbb`](https://github.com/Tdavide04/vinted-scanner/commit/89c8cbb27df9f61ff4c9fb50bf577cca06a2d955) | 0.2.0 | GPL-3.0-only | `vinted` | `opportunity_hunter.sources.vinted` |
+| [vinted-scanner](https://github.com/Tdavide04/vinted-scanner) | [`788630e`](https://github.com/Tdavide04/vinted-scanner/commit/788630e54063f9cd9c10f0d4270af77ce039272d) | 0.3.0 | GPL-3.0-only | `vinted` | `opportunity_hunter.sources.vinted` |
 | [ebay-scanner](https://github.com/Tdavide04/ebay-scanner) | not yet | — | — | — | planned: waits for an eBay Developer keyset |
 
 The scanners never import Opportunity Hunter, and Opportunity Hunter never imports Personal Collection Hub.
